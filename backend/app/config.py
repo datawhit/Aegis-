@@ -99,6 +99,16 @@ class Settings(BaseSettings):
     # the app uses the regular pool (Phase 0 behavior).
     audit_writer_database_url: str = ""
 
+    # --- Audit export signing (Sprint 4) ---
+    # Ed25519 private key in PEM ("BEGIN PRIVATE KEY") form. When unset,
+    # the export endpoint produces an unsigned receipt (a marker line with
+    # `"signature": null`) — fine for local dev, fail-loud in prod via the
+    # boot-time check in main.py.
+    audit_export_signing_key: str = ""
+    # Stable key identifier so verifiers can match the right public key
+    # after rotation. Suggested format: "aegis-audit-vYYYY-MM" or a UUID.
+    audit_export_signing_key_id: str = "dev-unsigned"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

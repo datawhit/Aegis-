@@ -12,7 +12,8 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUserDep, SessionDep
 from app.core.policy.dsl import PolicyDSLError, context_from_request, evaluate_match
-from app.models.policy import Policy, PolicyEffect as ORMPolicyEffect
+from app.models.policy import Policy
+from app.models.policy import PolicyEffect as ORMPolicyEffect
 from app.models.user import UserRole
 from app.schemas.policy import (
     PolicyCreate,
@@ -33,12 +34,21 @@ def _require_admin(user) -> None:  # type: ignore[no-untyped-def]
         )
 
 
+def _require_admin_or_reviewer(user) -> None:  # type: ignore[no-untyped-def]
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role not in {UserRole.ADMIN.value, UserRole.REVIEWER.value}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="admin or reviewer role required",
+        )
+
+
 @router.get("/policies", response_model=PolicyList)
 async def list_policies(
     session: SessionDep,
     current_user: CurrentUserDep,
 ) -> PolicyList:
-    _require_admin(current_user)
+    _require_admin_or_reviewer(current_user)
     rows = (
         await session.execute(
             select(Policy).order_by(Policy.priority.desc(), Policy.name.asc())
@@ -53,7 +63,7 @@ async def get_policy(
     session: SessionDep,
     current_user: CurrentUserDep,
 ) -> PolicyRead:
-    _require_admin(current_user)
+    _require_admin_or_reviewer(current_user)
     policy = (
         await session.execute(select(Policy).where(Policy.id == policy_id))
     ).scalar_one_or_none()

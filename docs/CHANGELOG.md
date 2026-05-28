@@ -1079,3 +1079,398 @@ flat). Sprint 2 makes the per-action axis concrete.
 ---
 
 > End of Sprint 02. Next entry: **Sprint 03 — Production posture.**
+
+---
+
+## SPRINT 03 — PRODUCTION POSTURE
+
+- **DATE:** 2026-05-28
+- **STATUS:** Delivered. Awaiting review before Sprint 4 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Harden the demo loop toward a production posture by: using the dedicated
+audit-writer role for insert-only audit writes, providing a compliance-
+grade audit export, completing policy CRUD endpoints, gating rollback on
+role, and improving connector token behaviour (MS Graph token cache).
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- Use the `AEGIS_AUDIT_WRITER_DATABASE_URL` when present so audit INSERTs
+  use the `aegis_audit_writer` role / pool instead of the main DB pool.
+- `GET /api/v1/audit/export` — NDJSON (JSONL) export endpoint for
+  compliance receipts (admin-only, optional `since` filter).
+- Policy CRUD: `GET/PUT/DELETE /api/v1/policies/{id}` (admin-only) and
+  server-side DSL validation at write-time.
+- Role-gated rollback: only `operator` or `admin` may POST
+  `/api/v1/remediations/{id}/rollback` (prevents unauthorised rollbacks).
+- Microsoft Graph connector: simple in-process access-token caching to
+  reduce client-credentials churn.
+- Regression tests: `tests/test_audit_export.py` plus related test
+  adjustments for approval/rollback flows.
+
+Out of scope:
+
+- Full OTel collector + traces/metrics dashboards (still Sprint 3 target
+  item D-3 to be completed in follow-up).
+- Policy editor UI and multi-channel approval delivery (Phase 3).
+
+### SECURITY CONSIDERATIONS
+
+- Audit exports are admin-only and should be requested only by
+  authorized compliance processes.
+- Operators must rotate the `aegis_audit_writer` password after running
+  the migration; the app will use the DSN only when `AEGIS_AUDIT_WRITER_DATABASE_URL`
+  is configured.
+- Rollback endpoint now requires `operator` or `admin` role.
+
+### FEATURES IMPLEMENTED
+
+- Audit-writer pool wiring + commit path when `AEGIS_AUDIT_WRITER_DATABASE_URL` set
+- `GET /api/v1/audit/export` (NDJSON) — admin-only
+- Policy CRUD: get / put / delete endpoints added with DSL validation
+- Role-gated rollback on remediations
+- MS Graph token caching (in-process) to reduce token fetches
+- Test: `backend/tests/test_audit_export.py`
+
+### FILES CREATED / MODIFIED (selection)
+
+- Created: `backend/app/api/v1/audit.py`, `backend/tests/test_audit_export.py`
+- Modified: `backend/app/db.py`, `backend/app/core/audit/logger.py`,
+  `backend/app/api/v1/policies.py`, `backend/app/api/v1/remediations.py`,
+  `backend/app/api/v1/approvals.py`, `backend/app/logging.py`,
+  `backend/app/core/execution/microsoft_graph.py`
+
+### DATABASE CHANGES
+
+No new migrations required for Sprint 3 — Alembic `0002_audit_writer_role`
+already created the `aegis_audit_writer` role and grants in Sprint 2.
+
+### TECHNICAL DEBT (updates)
+
+- **D-18 (done):** audit-writer connection pool now plumbed and used when configured.
+- **D-19 (partial):** Policy CRUD update/delete endpoints added; UI still required.
+- **D-21 (done):** Rollback authorization tightened to `operator|admin`.
+- **D-24 (done):** MS Graph token caching implemented (in-process). 
+- Remaining debt: D-3, D-7, D-23, D-24 (further improvements), D-25, and others from prior sprints.
+
+### RISKS IDENTIFIED
+
+- Audit export must be used with care — the endpoint bypasses UI-level
+  paging and can produce large payloads; operator training and limits
+  should be applied before enabling broadly.
+- In-process token cache is adequate for low-volume demo traffic but
+  will need a resilient shared cache (Redis) before high-volume
+  operation.
+
+### NEXT STEPS — Sprint 04 candidate scope
+
+1. OTel collector + traces + metrics + Grafana dashboards (complete D-3).
+2. Policy editor UI + policy CRUD UX polish.
+3. Audit export signing and JSONL receipt (signed export for compliance).
+4. Move token cache to shared cache (D-24 follow-up).
+5. Role-gated rollback policies (fine-grained RBAC and audit reviewer).
+
+---
+
+> End of Sprint 03. Next entry: **Sprint 04 — Compliance posture.**
+
+---
+
+## SPRINT 04 — COMPLIANCE POSTURE
+
+- **DATE:** 2026-05-29
+- **STATUS:** Delivered. Awaiting review before Sprint 5 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Turn the audit trail into something an external compliance officer can
+verify offline, give them an account that can only do what they need,
+and tighten the rollback gate so the most consequential undo actions
+require a senior actor on record.
+
+This is the **compliance wedge** from Sprint 02's Q21 — the bet is that
+"give me a signed, verifiable transcript of every AI decision" is the
+single capability incumbents can't trivially match without rebuilding
+their audit pipeline.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **Signed audit-export receipts** (ADR-015). Each NDJSON export now
+  ends with a `{"receipt": true, ..., "signature": "<hex>"}` line. The
+  signature is Ed25519 over the canonical JSON of the receipt minus
+  the `signature` field, using a key configured via
+  `AEGIS_AUDIT_EXPORT_SIGNING_KEY`. The receipt carries `head_entry_hash`
+  (last exported entry), `tip_entry_hash` (chain tip at snapshot time),
+  `content_hash` (SHA-256 over the ordered entry hashes), exporter
+  identity, `signing_key_id`, and ISO timestamps.
+- **Standalone verifier** (`python -m app.scripts.verify_audit_export
+  --file ... --public-key ...`) that re-derives every check from the
+  file alone — no DB access.
+- **REVIEWER user role** (ADR-016) with read access to audit export,
+  policies, incidents, approvals; no mutation rights.
+- **Fine-grained rollback RBAC** (ADR-017): reversible classes →
+  `operator|admin`, non-reversible (REVOKE_USER_SESSIONS,
+  FORCE_PASSWORD_RESET, NOTIFY_SLACK, CUSTOM) → `admin` only.
+- **`RemediationActionClass.is_reversible`** property + private
+  `_NON_REVERSIBLE_ACTIONS` frozenset as the single source of truth.
+- **Reusable role deps** (`AdminDep`, `AdminOrOperatorDep`,
+  `AdminOrReviewerDep`) in `app.api.deps`.
+- **Export endpoint records itself.** Every `/audit/export` call writes
+  an `audit.exported` entry to the chain (captured AFTER the export's
+  tip snapshot, so it's visible to the *next* export, not this one).
+
+Explicitly out of scope:
+
+- Policy editor UI / audit-chain explorer UI (frontend Sprint 5).
+- Multi-channel notifications (Email + Web) — deferred.
+- Per-tenant signing keys / KMS integration — single key for now.
+- OTel observability (still owed; D-3).
+
+### SECURITY CONSIDERATIONS
+
+- **Default require_signature=true.** Hitting `/audit/export` in
+  production without a signing key configured returns `503` rather than
+  emitting an unsigned export. Local dev can pass
+  `?require_signature=false` to get an explicitly-unsigned receipt
+  (`"signature": null`).
+- **No HMAC for receipts.** The verifier needs only the public key —
+  the auditor cannot forge a receipt even if they hold their own copy.
+- **Snapshot-before-record.** The receipt's `tip_entry_hash` is captured
+  before the export is itself audited. The "audit.exported" entry lives
+  on the chain but does not appear in *this* export (preventing
+  circularity).
+- **`CUSTOM` defaults to non-reversible.** Unknown blast radius = fail
+  closed.
+- **Reviewer can read everything compliance needs**, and nothing else.
+  They cannot decide approvals (still gated by `approval_required_role`)
+  or trigger rollbacks (`UserRole.ADMIN`/`OPERATOR` only at the API
+  edge).
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-015** Signed audit-export receipts via Ed25519
+- **ADR-016** REVIEWER role for compliance read-only access
+- **ADR-017** Rollback authorization scales with action reversibility
+
+### FEATURES IMPLEMENTED
+
+| Feature                                            | Status | Notes                                              |
+| -------------------------------------------------- | ------ | -------------------------------------------------- |
+| Ed25519 signed export receipts                     | ✅     | `app/core/audit/export_signer.py`                  |
+| Standalone verifier CLI                            | ✅     | `app/scripts/verify_audit_export.py`               |
+| `REVIEWER` user role                               | ✅     | `UserRole.REVIEWER`                                |
+| `AdminDep` / `AdminOrOperatorDep` / `AdminOrReviewerDep` | ✅ | Single-line role gating at endpoint signature    |
+| Reviewer access on `/audit/export`                 | ✅     | `AdminOrReviewerDep`                               |
+| Reviewer access on `GET /policies(/{id})`          | ✅     |                                                    |
+| Reviewer access on `GET /incidents(/{id})`         | ✅     | Already authenticated-only; reviewer included      |
+| `RemediationActionClass.is_reversible` classifier  | ✅     | Single source of truth for the rollback gate       |
+| Rollback fine-grained RBAC                         | ✅     | Non-reversible classes require admin               |
+| `audit.exported` entry on every export             | ✅     | Captured after tip snapshot                        |
+| `?require_signature=` toggle                       | ✅     | Default true; false yields explicitly-null sig     |
+| Tests: signer unit                                 | ✅     | 8 cases                                            |
+| Tests: signed export e2e                           | ✅     | Includes tampering & reviewer-access cases         |
+| Tests: rollback RBAC matrix                        | ✅     | Operator/admin × reversible/non-reversible         |
+| Tests: reviewer role access matrix                 | ✅     |                                                    |
+
+### FILES CREATED (5)
+
+- `backend/app/core/audit/export_signer.py`
+- `backend/app/scripts/verify_audit_export.py`
+- `backend/tests/test_export_signer.py`
+- `backend/tests/test_rollback_rbac.py`
+- `backend/tests/test_reviewer_role.py`
+
+### FILES MODIFIED (9)
+
+- `backend/app/api/deps.py` — three named role deps
+- `backend/app/api/v1/audit.py` — signed receipt + reviewer access +
+  snapshot semantics
+- `backend/app/api/v1/policies.py` — reviewer access on GETs
+- `backend/app/api/v1/remediations.py` — reversibility-aware RBAC
+- `backend/app/config.py` — `audit_export_signing_key` +
+  `audit_export_signing_key_id`
+- `backend/app/models/user.py` — `UserRole.REVIEWER`
+- `backend/app/models/remediation_action.py` — `is_reversible` property
+- `backend/tests/test_audit_export.py` — rewritten for new receipt
+  format + reviewer-allowed + signing key paths
+- `docs/DECISIONS.md` — ADRs 015–017
+
+### DATABASE CHANGES
+
+**None.** `UserRole` is stored as a `VARCHAR` with non-native-enum
+SQLAlchemy mapping, so adding `REVIEWER` does not require a migration.
+
+### API CHANGES
+
+| Method | Path                                | Auth                | Description                                  |
+| ------ | ----------------------------------- | ------------------- | -------------------------------------------- |
+| GET    | `/api/v1/audit/export`              | admin or reviewer   | Now ends with a signed receipt line          |
+| GET    | `/api/v1/policies`                  | admin or reviewer   | Was admin-only; reviewer added               |
+| GET    | `/api/v1/policies/{id}`             | admin or reviewer   | Was admin-only; reviewer added               |
+| POST   | `/api/v1/remediations/{id}/rollback`| operator/admin (rev.); admin (non-rev.) | Authorization now action-class-sensitive |
+
+New query params on `/audit/export`:
+
+- `require_signature` (bool, default `true`): when false and no key is
+  configured, returns an unsigned receipt with `"signature": null`
+  instead of `503`.
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                                  | Owed-by Sprint |
+| ---- | ----------------------------------------------------------------------------------------------------- | -------------- |
+| D-26 | Single signing key — no rotation / KMS. Move to envelope encryption + per-env keys.                   | Sprint 5       |
+| D-27 | `signing_key_id` is a free-form string; no registry / metadata file mapping id → public key.          | Sprint 5       |
+| D-28 | Verifier CLI is offline-only — no helper to fetch the public key from a `/.well-known/...` endpoint. | Sprint 5       |
+| D-29 | Reviewer cannot read `/audit/{entry_id}` because that endpoint does not exist yet — only export.     | Sprint 5       |
+| D-30 | `entries_digest` is custom (not RFC 8785 JCS). Document or migrate before any external interop.       | Sprint 6       |
+| D-31 | Approval-channel role mapping still string-compared (`approval_required_role`) — reviewer noise risk. | Sprint 5       |
+
+(Open from prior sprints: D-3, D-7, D-22, D-23, D-25, plus partially-closed Sprint 03 items.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                        | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-19 | Signing key leak from env → forged exports are indistinguishable from genuine                                | Low        | High     | D-26 (rotation + KMS). For now: vault the env, alarm on key reads.               |
+| R-20 | Receipt canonicalization drift between writer and verifier produces false-negative verifications              | Low        | Medium   | Single `_canonical_bytes()` reused on both sides; ADR pins the rule              |
+| R-21 | Reviewer accidentally granted write privileges by future endpoint that uses `CurrentUserDep` instead of `AdminDep` | Medium | Medium   | Lint rule / review checklist; consider an `AnyAuthenticatedNonReviewerDep` later |
+| R-22 | Non-reversible classification becomes outdated when a new action class is added without an `is_reversible` opinion | Medium | Medium | Default for `CUSTOM` is non-reversible (fail-closed); future ADR adds a `is_reversible=False` test invariant |
+| R-23 | `?require_signature=false` in prod (operator error) produces unsigned exports with `"signature": null`        | Medium | High     | Server should refuse `require_signature=false` when `env in {staging,prod}` — follow-up |
+
+### ROLLBACK STRATEGY
+
+- **Schema:** no migrations.
+- **Signing key:** unset `AEGIS_AUDIT_EXPORT_SIGNING_KEY` to revert
+  exports to unsigned-with-null-signature (callers must also pass
+  `?require_signature=false`).
+- **Reviewer role:** revoking the role from a user via the seed/SSO
+  mapping immediately removes access. The enum value can stay even if
+  no user has it.
+- **Rollback RBAC:** to revert to Sprint 03's blanket
+  `operator|admin`, remove the `is_reversible` check at the API edge
+  (keep the property itself — it has no other callers yet).
+
+### KNOWN LIMITATIONS
+
+1. **One signing key, hand-managed.** No rotation, no KMS integration
+   (D-26).
+2. **No bulk auditor onboarding flow.** Creating a reviewer is the
+   same admin DB write as creating any other user.
+3. **Verifier CLI is online-key only.** If you want to verify an
+   export from yesterday with last week's key, you need both PEMs at
+   hand (D-27/D-28).
+4. **R-23 not yet mitigated.** Production should refuse the
+   `require_signature=false` escape hatch — current implementation
+   honors it regardless of env.
+
+### OBSERVABILITY (current state)
+
+- **Logs:** new structured events: `audit.export.completed` (with
+  signed/unsigned flag), `rollback.denied.non_reversible`,
+  `audit.exported` (audit-chain entry).
+- **Audit chain:** every export request appears as `audit.exported` in
+  the next export. Rollback denials due to non-reversibility do NOT
+  hit the audit chain (they're 403s at the API edge before the
+  executor sees them); R-21 makes this slightly load-bearing —
+  consider auditing denials in Sprint 5.
+
+### NEXT STEPS — Sprint 05 candidate scope
+
+Working title: **"Operational visibility + observability."**
+
+The compliance bones are now solid. Sprint 5 should turn the system
+inside-out for operators:
+
+1. **OTel collector + traces + metrics + Grafana dashboards (D-3 —
+   carried for the third sprint running; needs to land).**
+2. **Signing-key rotation + key registry (D-26, D-27).**
+3. **`/.well-known/aegis-audit-public-key` endpoint (D-28).**
+4. **Audit-chain explorer UI** — let an analyst (or reviewer) browse
+   the chain in the app rather than via a downloaded NDJSON.
+5. **Production guardrail: refuse `require_signature=false` in
+   non-local env (R-23).**
+6. **Approval-channel reviewer-noise fix (D-31).**
+7. **Audit denial events** for rollback 403s (R-21 mitigation).
+
+Carry-over: prior open D-items (D-3, D-7, D-22, D-23, D-25, plus
+freshly-introduced D-26 through D-31).
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-18 | KMS choice — AWS KMS, GCP KMS, HashiCorp Vault, or self-managed?                                       | Sprint 5  |
+| OQ-19 | Should the public-key endpoint be unauthenticated (truly well-known) or scoped to authenticated users?  | Sprint 5  |
+| OQ-20 | Audit chain UI — read-only view, or read + "request export of this range" inline?                       | Sprint 5  |
+| OQ-21 | Do we need a tenant-scoped signing key from day one, or is single-key acceptable for the first design partner? | Sprint 5  |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 04 closeout
+
+> Prior sprints' strategy questions still stand. New ones surfaced by
+> the compliance wedge:
+
+### 1. The signed-receipt as a sales artifact
+
+We now produce an artifact that's directly relevant to SOC 2 / ISO 27001
+evidence collection. Auditors get a downloadable transcript they can
+verify offline against a published public key. No incumbent SOAR / SIEM
+currently ships this.
+
+- **Q25.** Do we lead the next round of buyer conversations with the
+  signed receipt as the *primary* differentiator (governance-first
+  pitch), or does it stay in the "and by the way…" portion of the demo?
+  My recommendation: **lead with it for regulated-industry buyers (Q3
+  option c), keep it as a closer for SaaS SOCs**. Different buyers
+  weight it differently.
+
+### 2. KMS-or-self-managed choice for the signing key
+
+We currently load the private key from `AEGIS_AUDIT_EXPORT_SIGNING_KEY`
+(PEM in env). Production rotation needs a real story.
+
+- **Q26.** Is the signing key something *we* manage (managed-service
+  cost, simpler customer story) or something the **customer's KMS**
+  signs with (no Anthropic-side liability if a customer's auditor
+  contests authenticity)? The latter is the harder build but it's the
+  posture that matches "your audit, your key, your auditor's trust."
+
+### 3. The reviewer-role go-to-market
+
+We can hand a reviewer login to a prospect's compliance officer during
+a pilot. They can verify the system from their side without operator
+access.
+
+- **Q27.** Is the **"compliance pilot"** a sales motion we want to
+  formalize — i.e., during the design-partner phase, we explicitly
+  offer the buyer's compliance org a reviewer account and walk them
+  through running the verifier CLI? This makes them an *ally* during
+  procurement.
+
+### 4. Where the wedge points next
+
+Sprint 02 raised Q19 (lead-with-reversible vs non-reversible demo).
+Sprint 04 makes a related question concrete: when a non-reversible
+action gets rolled back, an admin had to make that call. That's a
+*great* discussion artifact.
+
+- **Q28.** Should we surface the "non-reversible rollback decisions
+  this week" as a dedicated weekly digest for CISOs? It's a small
+  feature with outsized signal value — it tells the buyer exactly the
+  kind of decisions their senior staff are making, in a format that
+  reads like a board-deck slide.
+
+---
+
+> End of Sprint 04. Next entry: **Sprint 05 — Operational visibility + observability.**

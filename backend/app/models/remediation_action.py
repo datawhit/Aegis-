@@ -5,7 +5,8 @@ import enum
 import uuid
 
 from sqlalchemy import Enum, Float, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPKMixin
@@ -27,6 +28,24 @@ class RemediationActionClass(str, enum.Enum):
     OPEN_JIRA_TICKET = "open_jira_ticket"
     # Other
     CUSTOM = "custom"
+
+    @property
+    def is_reversible(self) -> bool:
+        """Whether a real (not no-op) rollback is possible.
+
+        Used by the rollback RBAC check: non-reversible classes require
+        admin to acknowledge that "rollback" is at best a compensating
+        action (e.g. re-issuing credentials), not an undo.
+        """
+        return self not in _NON_REVERSIBLE_ACTIONS
+
+
+_NON_REVERSIBLE_ACTIONS: frozenset[RemediationActionClass] = frozenset({
+    RemediationActionClass.REVOKE_USER_SESSIONS,
+    RemediationActionClass.FORCE_PASSWORD_RESET,
+    RemediationActionClass.NOTIFY_SLACK,
+    RemediationActionClass.CUSTOM,  # unknown blast radius — fail closed
+})
 
 
 class RemediationStatus(str, enum.Enum):

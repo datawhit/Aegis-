@@ -349,6 +349,111 @@
 
 ---
 
+## ADR-015 — Signed audit-export receipts via Ed25519
+
+- **Date:** 2026-05-29 (Sprint 04)
+- **Status:** Accepted
+- **Context:** Sprint 3 shipped `GET /audit/export` as plain NDJSON. A
+  compliance officer who downloads such a file cannot prove later that
+  it was the un-tampered server output without a separate chain-of-custody
+  story. The hash chain inside each row protects against in-DB tampering
+  but says nothing about what was *handed to the auditor.*
+- **Decision:** Each export ends with a final `{"receipt": true, ...}`
+  line carrying: the requested range + count, the last entry's
+  `entry_hash` (`head_entry_hash`), the chain tip at snapshot time
+  (`tip_entry_hash`), a SHA-256 over the ordered list of entry hashes
+  (`content_hash`), the exporter identity, a `signing_key_id`, and an
+  Ed25519 `signature` over the canonical JSON of the receipt minus
+  `signature`. A standalone `app.scripts.verify_audit_export` CLI lets a
+  recipient verify without touching the database.
+- **Why Ed25519 over RSA or HMAC:**
+  - HMAC requires sharing the verification secret with the auditor —
+    they could then *forge* a receipt, defeating non-repudiation.
+  - Ed25519: small (64-byte sig), modern, no parameter choices, fast.
+- **Key management:** Private key in `AEGIS_AUDIT_EXPORT_SIGNING_KEY`
+  (PEM). `signing_key_id` is stable so verifiers can pin the right public
+  key after rotation. By default the export endpoint **refuses** to run
+  without a key (`require_signature=true`); local dev can pass
+  `?require_signature=false` to get an unsigned receipt with explicit
+  `"signature": null`.
+- **Snapshot semantics:** The endpoint captures the chain tip BEFORE
+  recording the "audit.exported" entry. The export's own request entry
+  therefore does NOT appear in this export — it appears in any future
+  export, which is the point.
+- **Consequences:**
+  - + Exports are independently verifiable: anyone with the public key
+    can prove (a) the file wasn't truncated, (b) the chain links
+    correctly, (c) the receipt was signed by the production server.
+  - + A leaked export is still an export — there's no secret to rotate
+    other than the signing key itself.
+  - – Adds a `cryptography` dependency (already transitively present
+    via `python-jose[cryptography]`).
+  - – Key rotation requires an out-of-band channel to distribute the
+    new public key + `signing_key_id` to verifiers.
+
+---
+
+## ADR-016 — REVIEWER role for compliance read-only access
+
+- **Date:** 2026-05-29 (Sprint 04)
+- **Status:** Accepted
+- **Context:** The audit export and policy snapshot are exactly the
+  artifacts a compliance officer / external auditor will want to read.
+  Granting them `ADMIN` to fetch a receipt is the worst possible posture
+  — they also gain policy-write, rollback, and seed-script access.
+- **Decision:** Introduce `UserRole.REVIEWER`. Reviewer can `GET`:
+  `/audit/export`, `/policies`, `/policies/{id}`, `/incidents`,
+  `/incidents/{id}`, `/approvals`. Reviewer **cannot** create/update/
+  delete policies, decide approvals, or trigger rollbacks. Three named
+  dependency injectors live in `app.api.deps` (`AdminDep`,
+  `AdminOrOperatorDep`, `AdminOrReviewerDep`) so role policy at endpoint
+  level is one line of annotation.
+- **Why a fifth role rather than overloading VIEWER:** VIEWER is
+  defined as default-zero-privilege (e.g. a fresh SSO user before role
+  mapping). Reviewer carries explicit compliance-export rights that we
+  do NOT want a new user to inherit by accident.
+- **Consequences:**
+  - + Compliance reviewers can do their job with a single-purpose
+    credential. Audit log records the reviewer's identity on every
+    export request.
+  - + Future fine-grained RBAC (D-26) extends this pattern without a
+    schema migration — `UserRole` is a string-backed enum.
+  - – One more role for the seed/SSO-mapping conversation; documented
+    in `seed_dev_admin.py` and the role enum.
+
+---
+
+## ADR-017 — Rollback authorization scales with action reversibility
+
+- **Date:** 2026-05-29 (Sprint 04)
+- **Status:** Accepted; refines ADR-014/Sprint 03's blanket `operator|admin` gate
+- **Context:** Sprint 3 made rollback `operator|admin`. But "rollback" of
+  `REVOKE_USER_SESSIONS` is not really an undo — the sessions are already
+  destroyed; calling rollback at best records that a human concluded the
+  revoke was unwarranted. The audit weight of that signal is much higher
+  than the audit weight of un-isolating a host (truly reversible).
+- **Decision:** `RemediationActionClass.is_reversible` classifies each
+  action class. The rollback endpoint requires:
+  - Reversible classes (ISOLATE_HOST, DISABLE_USER, BLOCK_IP,
+    BLOCK_DOMAIN, QUARANTINE_FILE, OPEN_JIRA_TICKET) → `operator|admin`.
+  - Non-reversible classes (REVOKE_USER_SESSIONS, FORCE_PASSWORD_RESET,
+    NOTIFY_SLACK, CUSTOM) → `admin` only.
+- **Why the conservative split for `CUSTOM`:** unknown reversibility =
+  fail-closed. A future "we know how to undo this" custom action would
+  need to either declare itself reversible explicitly or get its own
+  enum value.
+- **Consequences:**
+  - + The "did a human knowingly accept the irreversible action?" signal
+    is now attributable to a senior actor.
+  - + No state-machine change: the gate is purely at the API edge; the
+    executor stays role-agnostic.
+  - – Operators lose the ability to "rollback" non-reversible actions
+    autonomously; in practice this matches the operational reality
+    (a compensating control like forcing re-MFA still requires admin
+    or out-of-band action).
+
+---
+
 ## ADR template (for future ADRs)
 
 ```

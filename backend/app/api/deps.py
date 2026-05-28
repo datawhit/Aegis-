@@ -10,10 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.identity import IdentityProvider, get_identity_provider
 from app.core.identity.base import InvalidTokenError
 from app.db import get_session
-from app.models.user import User
+from app.models.user import User, UserRole
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 IdentityDep = Annotated[IdentityProvider, Depends(get_identity_provider)]
+
+
+def _role_value(user: User) -> str:
+    return user.role.value if hasattr(user.role, "value") else str(user.role)
 
 
 async def get_current_user(
@@ -49,3 +53,33 @@ async def get_current_user(
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+def _enforce_roles(user: User, allowed: set[str]) -> User:
+    if _role_value(user) not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"requires one of: {', '.join(sorted(allowed))}",
+        )
+    return user
+
+
+async def require_admin(current_user: CurrentUserDep) -> User:
+    return _enforce_roles(current_user, {UserRole.ADMIN.value})
+
+
+async def require_admin_or_operator(current_user: CurrentUserDep) -> User:
+    return _enforce_roles(
+        current_user, {UserRole.ADMIN.value, UserRole.OPERATOR.value}
+    )
+
+
+async def require_admin_or_reviewer(current_user: CurrentUserDep) -> User:
+    return _enforce_roles(
+        current_user, {UserRole.ADMIN.value, UserRole.REVIEWER.value}
+    )
+
+
+AdminDep = Annotated[User, Depends(require_admin)]
+AdminOrOperatorDep = Annotated[User, Depends(require_admin_or_operator)]
+AdminOrReviewerDep = Annotated[User, Depends(require_admin_or_reviewer)]
