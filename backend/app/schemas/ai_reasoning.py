@@ -20,3 +20,7 @@ class AIReasoningRead(BaseModel):
     prompt_tokens: int | None
     completion_tokens: int | None
     latency_ms: int | None
+    # Full rendered prompt (post-PII redaction). Surfaced behind a UI
+    # disclosure — the operator should be able to inspect what the model
+    # actually saw (Q11).
+    prompt: str | None = None

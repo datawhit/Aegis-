@@ -239,6 +239,116 @@
 
 ---
 
+## ADR-011 — JSON-rule policy DSL with opt-in autonomy per action class
+
+- **Date:** 2026-05-27 (Sprint 02)
+- **Status:** Accepted (Phase 2 cut; CEL / Cedar spike Phase 3+)
+- **Context:** The Sprint 1 stub engine escalated everything (ADR-005 was
+  the right starting posture). To close the loop with humans, we need a
+  DSL that's both **expressive enough** for real rules and **trivial
+  enough** to audit by inspection.
+- **Decision:** Ship a tiny JSON DSL — `and/or/not/eq/in/gte/lte/matches`
+  — evaluated against a flat context (action_class, blast_radius,
+  ai_confidence, incident_severity, has_rollback_plan). Combined with a
+  `constraints` blob on each policy that carries metadata like
+  `requires_approval: true|false` — the **per-action-class shadow-mode
+  lever** (Q13). Default shipped policies set `requires_approval: true`
+  on ALLOW rules; operators flip it to `false` per action class as
+  trust accumulates.
+- **Conflict + failure modes:**
+  - No policy matches → ESCALATE (no-rule = ask a human).
+  - Equal-priority ALLOW + ESCALATE → ESCALATE (no silent permissive
+    merge).
+  - DENY at any priority wins over equal-or-lower ALLOW.
+  - DSL evaluation error → policy skipped (treated as no-match).
+- **Why not CEL / OPA / Cedar yet:** all are more expressive, all are
+  another deployable. Phase 2 needs to ship; the DSL is intentionally
+  the smallest thing that demonstrates the trust posture. A Phase 3
+  spike compares the three against the same rule set.
+- **Consequences:**
+  - + Operators can read policies as-is. No DSL training required.
+  - + The DSL evaluator is ~100 LOC; verified by direct unit tests.
+  - – Limited expressiveness (no joins across DB tables, no time-of-day
+    rules). When we hit a real customer rule we can't write, that's
+    the migration signal.
+
+---
+
+## ADR-012 — Slack as the Sprint 2 approval channel; dry-run by default
+
+- **Date:** 2026-05-27 (Sprint 02)
+- **Status:** Accepted (Phase 2 scope; Email + Web UI in Phase 3)
+- **Context:** OQ-9 — approval channel breadth. Slack is where SecOps
+  teams already live; building three channels in Sprint 2 spreads the
+  surface too thin.
+- **Decision:**
+  - Sprint 2 ships **Slack only**, behind a `Notifier` abstraction so
+    Phase 3 channels are additive, not migrational.
+  - **Dry-run posture by default**: `AEGIS_SLACK_ENABLED=false` logs the
+    rendered Block Kit payload at INFO and skips the HTTP call. The
+    end-to-end demo loop is exercisable from `make up` with no real
+    Slack workspace.
+  - Inbound `POST /api/v1/slack/interact` verifies Slack's v0 HMAC
+    signature; signing secret must be configured to accept signed
+    callbacks in non-prod, and is required in prod.
+- **Consequences:**
+  - + One channel ships in 1 sprint, end-to-end including the inbound
+    callback contract.
+  - – Customers without Slack will block on Phase 3. Acceptable for
+    our target ICP (Q3 still open; mid-market SaaS SOCs all run Slack).
+
+---
+
+## ADR-013 — PII redaction in AI prompts; per-snapshot lookup table
+
+- **Date:** 2026-05-27 (Sprint 02)
+- **Status:** Accepted
+- **Context:** D-11. The Sprint 1 pipeline shipped raw entity values
+  (UPNs, IPs, hostnames, file hashes) into the LLM prompt. That's a
+  data-residency liability for any GDPR/SOC2-conscious customer.
+- **Decision:** A `PIIRedactor` walks the normalized payload and
+  replaces matches against known PII shapes with **salted, stable
+  tokens** (`<user:8e2f>`, `<ip:b14a>`, `<file:cd09>`, `<host:ff03>`).
+  The redaction is performed in `TriageService` **before** the provider
+  call. The lookup table (token → original) is persisted on the
+  reasoning snapshot's `evidence` field so the analyst UI can
+  de-redact for display, but the model only ever sees tokens.
+  Determinism within a single redaction call preserves co-reference
+  (the same email appearing twice gets the same token). Per-call salt
+  ensures tokens cannot be correlated across snapshots.
+- **Trade-off:** the model may classify slightly less accurately
+  without raw identifiers (e.g., it can't recognize internal naming
+  conventions like `svc-` prefixes). Acceptable. Bigger downside is
+  raw PII flowing to third-party LLMs.
+- **Future work:** allowlist for known-non-PII tokens (e.g., the
+  customer's own corporate domain stays unredacted for context);
+  optionally local-LLM proxy that handles PII without redaction at all.
+
+---
+
+## ADR-014 — DB-role-level audit immutability via `aegis_audit_writer`
+
+- **Date:** 2026-05-27 (Sprint 02)
+- **Status:** Accepted; closes ADR-006 follow-up
+- **Context:** ADR-006 deferred true DB-role enforcement to Sprint 2.
+- **Decision:** Migration `0002_audit_writer_role` creates a Postgres role
+  with `INSERT`-only on `audit_logs`. The application reads
+  `AEGIS_AUDIT_WRITER_DATABASE_URL`; when set, audit-log inserts use a
+  separate connection pool bound to that role. When unset (e.g., local
+  dev), the audit logger continues to use the regular pool — convenient
+  for development, but **production deployments must set it.**
+- **Belt-and-braces:** The hash-chain verifier (`workflows.verify_audit_chain`)
+  runs daily and posts a P0 Slack alert on mismatch. Even if the role
+  separation is somehow bypassed, tampering is detected.
+- **Consequences:**
+  - + A compromised app process running arbitrary SQL still can't
+    `UPDATE` or `DELETE` historical audit rows.
+  - + Verifier provides defense-in-depth.
+  - – Two connection pools means two sets of pool metrics; cost is small
+    relative to the trust gain.
+
+---
+
 ## ADR template (for future ADRs)
 
 ```

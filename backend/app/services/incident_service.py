@@ -30,11 +30,13 @@ from app.core.ai.base import TriageRequest
 from app.core.ai.triage import TriageDecision, TriageService, get_triage_service
 from app.core.audit import Actor, get_audit_logger
 from app.core.policy import (
+    PolicyDecision,
     PolicyEffect,
     PolicyEngine,
     PolicyEvalRequest,
     get_policy_engine,
 )
+from app.core.workflow import get_workflow_engine
 from app.logging import get_logger
 from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.incident import Incident, IncidentStatus
@@ -43,6 +45,7 @@ from app.models.remediation_action import (
     RemediationActionClass,
     RemediationStatus,
 )
+from app.services.approval_service import get_approval_service
 
 log = get_logger("services.incident")
 
@@ -148,7 +151,7 @@ class IncidentService:
                 reasoning_snapshot_id=decision.reasoning_snapshot_id,
             )
 
-        # --- 4) Policy eval (Sprint 1: stub returns ESCALATE) --------------
+        # --- 4) Policy eval + branch on effect/constraints ---------------
         if proposed is not None:
             policy_decision = await self._policy.evaluate(
                 session,
@@ -162,11 +165,6 @@ class IncidentService:
                 ),
             )
             proposed.status = _map_policy_to_remediation_status(policy_decision.effect)
-            incident.status = (
-                IncidentStatus.AWAITING_APPROVAL
-                if policy_decision.effect is PolicyEffect.ESCALATE
-                else incident.status
-            )
 
             await self._audit.record(
                 session,
@@ -180,7 +178,15 @@ class IncidentService:
                     "reasons": policy_decision.reasons,
                 },
             )
+
             effect = policy_decision.effect
+            await self._route_after_policy(
+                session,
+                incident=incident,
+                remediation=proposed,
+                decision=policy_decision,
+                triage=decision,
+            )
         else:
             # No proposal → the incident itself is the escalation surface.
             incident.status = IncidentStatus.ESCALATED
@@ -204,6 +210,100 @@ class IncidentService:
         )
 
     # ---------------------------------------------------------------- helpers
+    async def _route_after_policy(
+        self,
+        session: AsyncSession,
+        *,
+        incident: Incident,
+        remediation: RemediationAction,
+        decision: PolicyDecision,
+        triage: TriageDecision,
+    ) -> None:
+        """Implement the policy-effect → next-action branching.
+
+        Truth table:
+
+          DENY              → remediation cancelled; incident closed_false_positive
+                              if confidence high, else stays open for review.
+          ESCALATE          → request human approval (Slack); incident
+                              status awaiting_approval.
+          ALLOW + requires_approval=true
+                            → request human approval; incident
+                              awaiting_approval. (Sprint 2 default for the
+                              first ALLOW rule — Q13 shadow-mode posture.)
+          ALLOW + requires_approval=false
+                            → dispatch executor via WorkflowEngine.
+                              Incident → remediating.
+        """
+        # DENY: hard stop.
+        if decision.effect is PolicyEffect.DENY:
+            remediation.status = RemediationStatus.POLICY_DENIED
+            incident.status = IncidentStatus.OPEN
+            return
+
+        # Pull constraints from the winning policy. The DSL engine doesn't
+        # surface them on PolicyDecision yet — we re-query by matched id.
+        # Phase 2 keeps it simple; Phase 3 will pass constraints through.
+        requires_approval = await self._winning_policy_requires_approval(
+            session, decision
+        )
+
+        if decision.effect is PolicyEffect.ESCALATE:
+            await get_approval_service().request(
+                session,
+                remediation=remediation,
+                incident=incident,
+                ai_summary=triage.output.summary,
+                ai_reasoning=triage.output.reasoning,
+            )
+            incident.status = IncidentStatus.AWAITING_APPROVAL
+            return
+
+        # ALLOW path.
+        if requires_approval:
+            await get_approval_service().request(
+                session,
+                remediation=remediation,
+                incident=incident,
+                ai_summary=triage.output.summary,
+                ai_reasoning=triage.output.reasoning,
+            )
+            incident.status = IncidentStatus.AWAITING_APPROVAL
+            return
+
+        # ALLOW + no approval → autonomous. Dispatch executor.
+        incident.status = IncidentStatus.REMEDIATING
+        await session.flush()
+        engine = get_workflow_engine()
+        await engine.submit(
+            "execute_remediation",
+            payload={"remediation_action_id": str(remediation.id)},
+            idempotency_key=f"execute_remediation:{remediation.id}",
+        )
+
+    async def _winning_policy_requires_approval(
+        self,
+        session: AsyncSession,
+        decision: PolicyDecision,
+    ) -> bool:
+        # Default-safe: if we can't determine, require approval.
+        if not decision.matched_policy_ids:
+            return True
+        from app.models.policy import Policy
+        import uuid as _uuid
+
+        policies = (
+            await session.execute(
+                select(Policy).where(
+                    Policy.id.in_([_uuid.UUID(pid) for pid in decision.matched_policy_ids])
+                )
+            )
+        ).scalars().all()
+        for p in policies:
+            if (p.constraints or {}).get("requires_approval", True):
+                return True
+        return False
+
     async def _correlate_or_create(
         self,
         session: AsyncSession,

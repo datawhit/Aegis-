@@ -27,6 +27,7 @@ from app.core.ai.base import (
     TriageRequest,
     TriageResult,
 )
+from app.core.redaction import PIIRedactor
 from app.logging import get_logger
 from app.models.ai_reasoning import AIReasoningSnapshot
 from app.models.alert import AlertSeverity
@@ -43,8 +44,17 @@ class TriageDecision:
 
 
 class TriageService:
-    def __init__(self, provider: AIProvider) -> None:
+    def __init__(
+        self,
+        provider: AIProvider,
+        *,
+        redactor: PIIRedactor | None = None,
+    ) -> None:
         self._provider = provider
+        # `None` opts out of redaction — useful in fixture-driven tests
+        # where the model never sees real PII anyway. Production callers
+        # always pass one.
+        self._redactor = redactor
 
     async def triage(
         self,
@@ -53,8 +63,27 @@ class TriageService:
         *,
         incident_id: uuid.UUID | None = None,
     ) -> TriageDecision:
+        # --- 1. PII redaction (ADR-013) -----------------------------------
+        if self._redactor is not None:
+            normalized_redaction = self._redactor.redact(request.normalized)
+            excerpt_redaction = self._redactor.redact(request.raw_event_excerpt)
+            sanitized_request = TriageRequest(
+                alert_id=request.alert_id,
+                source=request.source,
+                normalized=normalized_redaction.payload,
+                raw_event_excerpt=excerpt_redaction.payload,
+            )
+            redaction_lookup = {
+                **normalized_redaction.lookup,
+                **excerpt_redaction.lookup,
+            }
+        else:
+            sanitized_request = request
+            redaction_lookup = {}
+
+        # --- 2. Provider call ---------------------------------------------
         try:
-            result = await self._provider.triage_alert(request)
+            result = await self._provider.triage_alert(sanitized_request)
             ai_failed = False
         except AIProviderError as exc:
             log.error("triage.ai_failed", alert_id=str(request.alert_id), error=str(exc))
@@ -63,14 +92,19 @@ class TriageService:
             result = _fallback_result(request, error=str(exc))
             ai_failed = True
 
+        # --- 3. Persist reasoning snapshot --------------------------------
+        # We store both the redacted evidence (what the model saw) AND the
+        # lookup table (so the UI can de-redact for the analyst). Raw,
+        # un-redacted normalized data still lives on the `alerts` row.
         snapshot = AIReasoningSnapshot(
             provider=result.provider,
             model=result.model,
             prompt_template_id=TRIAGE_PROMPT_VERSION,
             incident_id=incident_id,
             evidence={
-                "normalized": request.normalized,
-                "raw_excerpt": request.raw_event_excerpt,
+                "normalized_redacted": sanitized_request.normalized,
+                "raw_excerpt_redacted": sanitized_request.raw_event_excerpt,
+                "redaction_lookup": redaction_lookup,
                 "alert_id": str(request.alert_id),
                 "source": request.source,
             },
@@ -134,6 +168,9 @@ def get_triage_service() -> TriageService:
     global _singleton
     if _singleton is None:
         # Construct via DI'd provider; AnthropicAIProvider is the default
-        # in Phase 1 per ADR-007.
-        _singleton = TriageService(provider=AnthropicAIProvider())
+        # in Phase 1 per ADR-007. Phase 2 always redacts in production.
+        _singleton = TriageService(
+            provider=AnthropicAIProvider(),
+            redactor=PIIRedactor(),
+        )
     return _singleton

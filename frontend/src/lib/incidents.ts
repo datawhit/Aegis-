@@ -44,6 +44,7 @@ export type AIReasoningRead = {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   latency_ms: number | null;
+  prompt: string | null;
 };
 
 export type RemediationActionRead = {

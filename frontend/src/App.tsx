@@ -4,6 +4,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import LoginPage from "@/pages/LoginPage";
 import IncidentsListPage from "@/pages/IncidentsListPage";
 import IncidentDetailPage from "@/pages/IncidentDetailPage";
+import ApprovalInboxPage from "@/pages/ApprovalInboxPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -24,6 +25,7 @@ export default function App() {
       >
         <Route path="/incidents" element={<IncidentsListPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+        <Route path="/approvals" element={<ApprovalInboxPage />} />
         <Route index element={<Navigate to="/incidents" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/incidents" replace />} />

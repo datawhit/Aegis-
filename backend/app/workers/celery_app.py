@@ -11,6 +11,7 @@ registry.
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import settings
 
@@ -37,6 +38,18 @@ celery_app.conf.update(
     # is the trigger for Temporal migration (ADR-002, trigger #2).
     task_time_limit=900,
     task_soft_time_limit=840,
+    # Beat schedule — kicked off by `celery -A app.workers.celery_app beat`.
+    beat_schedule={
+        "audit-chain-verifier-daily": {
+            "task": "workflows.verify_audit_chain",
+            # 03:17 UTC daily — off-peak for most regions.
+            "schedule": crontab(hour="3", minute="17"),
+        },
+        "expire-stale-approvals-every-minute": {
+            "task": "workflows.expire_stale_approvals",
+            "schedule": 60.0,
+        },
+    },
 )
 
 

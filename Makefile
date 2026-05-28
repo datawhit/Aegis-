@@ -48,8 +48,13 @@ revision: ## Create a new Alembic revision (msg=...)
 	$(COMPOSE) exec backend alembic revision --autogenerate -m "$(msg)"
 
 .PHONY: seed
-seed: ## Seed a default admin user (dev only)
+seed: ## Seed dev admin user + default policies (dev only)
 	$(COMPOSE) exec backend python -m app.scripts.seed_dev_admin
+	$(COMPOSE) exec backend python -m app.scripts.seed_policies
+
+.PHONY: seed-policies
+seed-policies: ## Re-seed/upsert the default policy set
+	$(COMPOSE) exec backend python -m app.scripts.seed_policies
 
 .PHONY: shell
 shell: ## Open a shell in the backend container

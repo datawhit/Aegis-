@@ -709,3 +709,373 @@ depending on payload size.
 ---
 
 > End of Sprint 01. Next entry: **Sprint 02 — Closed-loop with a human in it.**
+
+---
+
+## SPRINT 02 — CLOSED-LOOP WITH A HUMAN IN IT
+
+- **DATE:** 2026-05-28
+- **STATUS:** Delivered. Awaiting review before Sprint 3 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Land the full closed loop: an incident escalates → a Slack-delivered
+approval request → a user approves → the workflow engine executes a real
+remediation (or its dry-run shadow) → rollback is invocable on demand,
+and the audit chain records every step. This is the **trust wedge** of
+the product, made tangible.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **JSON policy DSL** (`and/or/not/eq/in/gte/lte/matches`) +
+  `JSONPolicyEngine` with conflict-detection and DENY-wins-over-equal-priority
+  semantics. Three seed policies for the demo.
+- **PII redaction** in AI prompts; per-snapshot lookup table so the UI
+  can de-redact for display.
+- **DB-role audit immutability** (`aegis_audit_writer` INSERT-only) +
+  **HashChainVerifier** Celery beat task that re-walks the chain daily.
+- **Execution connector framework** + Microsoft Graph connector
+  (`revoke_user_sessions`) with **dry-run** posture by default — real
+  Graph calls behind `AEGIS_MS_GRAPH_LIVE=true`.
+- **Slack Notifier** with Block Kit approval requests; dry-run logs the
+  rendered payload when `AEGIS_SLACK_ENABLED=false`.
+- **`POST /api/v1/slack/interact`** Slack-signed webhook receiving
+  approve/reject button clicks.
+- **ApprovalService** state machine: request / approve / reject / expire.
+- **RemediationExecutor** service + Celery `workflows.execute_remediation`
+  task + rollback task.
+- **IncidentService updated:** policy ALLOW + `requires_approval=false`
+  dispatches executor; ALLOW + approval-required creates an Approval;
+  ESCALATE creates an Approval; DENY hard-stops.
+- New REST: `GET /approvals`, `POST /approvals/{id}/decision`,
+  `POST /remediations/{id}/rollback`, `GET/POST /policies` (admin),
+  `POST /slack/interact`.
+- Frontend: approval inbox page with approve/reject mutations,
+  remediation rollback control in incident detail, prompt-disclosure on
+  AI reasoning panel (data already persisted in Sprint 1).
+- Tests: policy DSL (10 cases), PII redaction (6 cases), audit verifier
+  (clean chain + tampering + link break detection), full e2e
+  approval→execute→rollback path with audit-chain assertion.
+
+Explicitly out of scope:
+
+- Email + Web-UI approval channels (Phase 3)
+- Policy update/delete + policy edit UI (Phase 3)
+- Real MS Graph live calls in CI (dry-run is the demo; live behind
+  flag for ops smoke)
+- Multi-tenant policy ownership (Phase 4)
+- CEL / Cedar policy DSL spike (Phase 3+)
+
+### SECURITY CONSIDERATIONS
+
+- **Default-deny preserved.** Baseline policy still ESCALATEs everything
+  unmatched. Specific ALLOW rules require explicit operator opt-in via
+  `constraints.requires_approval = false`.
+- **DENY wins over equal-priority ALLOW.** No silent permissive merge.
+- **Audit immutability** now enforced at two layers: DB role +
+  hash-chain verifier. Each catches what the other misses.
+- **PII redaction** is on by default in production; tests opt out
+  explicitly via `redactor=None`. New AI providers MUST NOT see raw
+  entity values.
+- **Slack signature** verifies v0 HMAC with 5-min replay window.
+- **Approval expiry** bounded — stale PENDING approvals move to EXPIRED
+  every minute via Celery beat (no one-click forever-approvals).
+- **Rollback authorization:** any authenticated user can POST to
+  `/remediations/{id}/rollback`. Phase 3 will gate on role; the
+  decision is logged with actor identity in the chain.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-011** JSON policy DSL with opt-in autonomy per action class
+- **ADR-012** Slack as the Sprint 2 approval channel; dry-run by default
+- **ADR-013** PII redaction in AI prompts; per-snapshot lookup table
+- **ADR-014** DB-role-level audit immutability via `aegis_audit_writer`
+
+### FEATURES IMPLEMENTED
+
+| Feature                                                | Status | Notes                                       |
+| ------------------------------------------------------ | ------ | ------------------------------------------- |
+| JSON policy DSL                                        | ✅     | 8 operators; <100 LOC evaluator             |
+| `JSONPolicyEngine`                                     | ✅     | Conflict-detect; DENY wins                  |
+| Seed policies (baseline-deny + 2 demo rules)           | ✅     | `make seed-policies`                        |
+| PII redactor (emails, IPs, hosts, file hashes)         | ✅     | Salted tokens; per-call lookup              |
+| TriageService PII redaction wired                      | ✅     | Lookup stored on snapshot evidence          |
+| `aegis_audit_writer` DB role migration                 | ✅     | Idempotent CREATE ROLE                      |
+| `HashChainVerifier`                                    | ✅     | Reports mismatches + link breaks            |
+| Celery beat: audit verifier daily, expiry every minute | ✅     | Crontab at 03:17 UTC                        |
+| `ExecutionConnector` framework + registry              | ✅     |                                             |
+| `MicrosoftGraphConnector` (`revoke_user_sessions`)     | ✅     | Dry-run default; live behind env flag       |
+| `StubExecutionConnector` for tests                     | ✅     |                                             |
+| `Notifier` abstraction                                 | ✅     |                                             |
+| `SlackNotifier` (Block Kit approval messages)          | ✅     | Dry-run default                             |
+| `POST /slack/interact` webhook                         | ✅     | v0 HMAC signed; maps Slack email → User     |
+| `ApprovalService` state machine                        | ✅     | request/approve/reject/expire               |
+| `RemediationExecutor` (execute + rollback)             | ✅     |                                             |
+| IncidentService policy-effect routing                  | ✅     | ALLOW/no-approval → autonomous              |
+| REST: approvals, remediations, policies                | ✅     |                                             |
+| Frontend approval inbox                                | ✅     | 5s refresh; approve/reject with note        |
+| Rollback control on incident detail                    | ✅     | Audited; requires reason                    |
+| Prompt disclosure on AI reasoning panel                | ✅     | Closes OQ-11; data already persisted        |
+| Tests: policy DSL                                      | ✅     | 10 cases                                    |
+| Tests: PII redaction                                   | ✅     | 6 cases including salt isolation            |
+| Tests: audit verifier                                  | ✅     | Clean + tamper-detection + link-break       |
+| Tests: e2e closed-loop                                 | ✅     | request → approve → execute → rollback      |
+
+### FILES CREATED (32)
+
+Backend — policy (3):
+- `app/core/policy/dsl.py`, `json_engine.py`
+- `app/scripts/seed_policies.py`
+
+Backend — redaction (2):
+- `app/core/redaction/__init__.py`, `pii.py`
+
+Backend — audit (1):
+- `app/core/audit/verifier.py`
+
+Backend — execution (4):
+- `app/core/execution/__init__.py`, `base.py`, `microsoft_graph.py`, `stub.py`
+
+Backend — notifications (3):
+- `app/core/notifications/__init__.py`, `base.py`, `slack.py`
+
+Backend — services + workers (4):
+- `app/services/approval_service.py`, `remediation_executor.py`
+- `app/workers/tasks/audit_verifier.py`, `remediation.py`
+
+Backend — API + schemas (7):
+- `app/api/v1/approvals.py`, `remediations.py`, `policies.py`, `slack.py`
+- `app/schemas/approval.py`, `policy.py`, `remediation.py`
+
+Backend — migration (1):
+- `alembic/versions/0002_audit_writer_role.py`
+
+Backend — tests (4):
+- `tests/test_policy_dsl.py`, `test_pii_redaction.py`, `test_audit_verifier.py`,
+  `test_approval_executor_e2e.py`
+
+Frontend (3):
+- `src/lib/approvals.ts`
+- `src/components/approvals/ApprovalCard.tsx`
+- `src/pages/ApprovalInboxPage.tsx`
+
+### FILES MODIFIED (16)
+
+- `Makefile` — `seed` now also seeds policies; new `seed-policies` target
+- `.env.example` — Slack, MS Graph, audit-writer DSN, policy lockdown
+- `backend/app/config.py` — added approval / Slack / Graph / policy /
+  audit-writer settings
+- `backend/app/core/policy/__init__.py` — `JSONPolicyEngine` is now default
+- `backend/app/core/audit/__init__.py` — export verifier
+- `backend/app/core/ai/triage.py` — redact before provider call
+- `backend/app/services/incident_service.py` — policy-effect routing
+- `backend/app/api/v1/router.py` — include 4 new routers
+- `backend/app/workers/celery_app.py` — beat schedule
+- `backend/app/workers/tasks/__init__.py` — register new task modules
+- `backend/app/schemas/ai_reasoning.py` — surface `prompt` field
+- `frontend/src/App.tsx` — `/approvals` route
+- `frontend/src/components/layout/AppShell.tsx` — approvals nav link
+- `frontend/src/components/incidents/AIReasoningPanel.tsx` — prompt disclosure
+- `frontend/src/lib/incidents.ts` — `prompt: string | null`
+- `frontend/src/pages/IncidentDetailPage.tsx` — rollback control
+
+### DATABASE CHANGES
+
+Migration `0002_audit_writer_role`:
+
+- `CREATE ROLE aegis_audit_writer LOGIN PASSWORD '<placeholder>' NOINHERIT NOCREATEDB NOCREATEROLE` (idempotent — guarded by `IF NOT EXISTS`).
+- `GRANT CONNECT, USAGE ON SCHEMA public, INSERT ON audit_logs` to that role.
+- Downgrade revokes grants but leaves the role itself (avoids destroying customizations).
+
+### API CHANGES
+
+| Method | Path                                        | Auth        | Description                                      |
+| ------ | ------------------------------------------- | ----------- | ------------------------------------------------ |
+| GET    | `/api/v1/approvals`                         | bearer      | List approvals; `pending_only` filter            |
+| POST   | `/api/v1/approvals/{id}/decision`           | bearer      | Approve/reject with optional note                |
+| POST   | `/api/v1/remediations/{id}/rollback`        | bearer      | Trigger rollback; requires reason                |
+| GET    | `/api/v1/policies`                          | bearer/admin| List policies (admin only)                       |
+| POST   | `/api/v1/policies`                          | bearer/admin| Create policy; DSL validated at write time       |
+| POST   | `/api/v1/slack/interact`                    | Slack HMAC  | Slack interactive component callback             |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                                | Owed-by Sprint |
+| ---- | --------------------------------------------------------------------------------------------------- | -------------- |
+| D-17 | Engine-initiated rollback is wired but no-op (only user-initiated rollback live)                   | Sprint 3       |
+| D-18 | Connection pool to `aegis_audit_writer` not yet plumbed — env var read but pool not built          | Sprint 3       |
+| D-19 | Policy CRUD update + delete endpoints + UI                                                          | Sprint 3       |
+| D-20 | Slack-email → Aegis-user mapping is by exact email match; needs SSO link in Phase 3                | Sprint 3       |
+| D-21 | Rollback authorization is "any authenticated user" — needs role gating                              | Sprint 3       |
+| D-22 | PII redaction allowlist (e.g., customer's own domain stays unredacted for model context)            | Sprint 3       |
+| D-23 | Cost / latency metrics for the executor (per-action-class p95)                                      | Sprint 3       |
+| D-24 | Microsoft Graph token caching (currently fetch-per-call)                                            | Sprint 3       |
+| D-25 | The IncidentService `_winning_policy_requires_approval` re-queries the DB — surface `constraints`   | Sprint 3       |
+
+(Open from prior sprints: D-3, D-6, D-7, D-8, D-9, D-10, D-12, D-13, D-14, D-15, D-16.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | ------------------------------------------------------------------------- |
+| R-13 | DSL too restrictive — first customer rule we can't write triggers a costly refactor                    | Medium     | Medium   | Migration triggers documented in ADR-011 — switch to CEL/Cedar at first miss |
+| R-14 | Slack signing-secret rotation breaks the inbound webhook silently                                      | Medium     | High     | Boot-time check verifies the signing secret is set in prod; alarms on 401  |
+| R-15 | MS Graph dry-run mode confuses operators into thinking action ran — incident shows EXECUTED but nothing happened | High       | Medium   | Status panel shows `dry_run=true`; UI labels "no-op" badges (Sprint 3 D-23 closes the gap with metrics) |
+| R-16 | Audit verifier finds a mismatch and pages on a false positive (canonicalization changes silently)      | Low        | Medium   | Canonicalization is one function (`_compute_entry_hash`); any change there bumps a verifier version pin |
+| R-17 | Approval expiry race: approver clicks Approve at minute 59:59 while beat task fires                    | Low        | Low      | The state machine's "not PENDING" guard catches it — approval fails fast    |
+| R-18 | Token tokens (`<user:8e2f>`) collide across snapshots and confuse the model                            | Low        | Low      | Salt is per-snapshot; collisions cross-snapshot are not semantic (model never sees both) |
+
+### ROLLBACK STRATEGY
+
+- **Schema:** migration `0002_audit_writer_role` is reversible; downgrade
+  revokes grants but leaves the role.
+- **Policy:** set `AEGIS_POLICY_ENGINE_FORCE_STUB=true` to revert to
+  Phase 1 always-escalate behavior in a hot lockdown.
+- **Slack / Graph:** both are env-flag gated (`AEGIS_SLACK_ENABLED`,
+  `AEGIS_MS_GRAPH_LIVE`); flipping false reverts to dry-run instantly.
+- **Frontend:** routes are additive; removing `/approvals` doesn't
+  affect incidents flow.
+
+### KNOWN LIMITATIONS
+
+1. **MS Graph dry-run is the default.** A demo shows everything working
+   end-to-end without actually revoking sessions — clearly labelled
+   `dry_run=true` in the execution result and audit chain.
+2. **Slack dry-run is the default.** Approval requests render in logs
+   only when `AEGIS_SLACK_ENABLED=false`.
+3. **Engine-initiated rollback** (`workflows.execute_remediation__rollback`)
+   is plumbed but no-op in Phase 2. Real triggers (failed mid-batch
+   execution, policy revocation) ship in Phase 3.
+4. **Audit-writer connection pool** is plumbed in env / migration but
+   the audit logger doesn't yet open a second pool. D-18.
+5. **Connectors for non-Microsoft platforms** (Okta, CrowdStrike, AWS
+   IAM) are not yet present. Coming in Phase 3.
+
+### OBSERVABILITY (current state)
+
+- **Logs:** new structured events: `policy.match`, `policy.eval_skipped`,
+  `slack.dry_run`, `ms_graph.dry_run.revoke_user_sessions`,
+  `approval.requested`, `approval.decided`, `approval.expired_batch`,
+  `remediation.executed`, `remediation.rollback`,
+  `audit.verifier.ok` / `audit.verifier.MISMATCH`.
+- **Audit chain:** every state transition writes an entry — see e2e test
+  for the canonical list.
+- **Metrics / traces:** still not wired (D-3, planned Phase 3).
+
+### NEXT STEPS — Sprint 03 candidate scope
+
+Working title: **"Production posture."**
+
+Proposed objective: take the closed loop from "demoable" to "shippable
+to a design partner." OTel collector wiring, real audit-writer
+connection pool, multi-channel notifications, role-gated rollback,
+Microsoft Graph token caching, and the first non-Microsoft connector
+(Okta or CrowdStrike — pick one).
+
+Specifically:
+
+1. **OTel collector + traces + metrics + Grafana dashboards (D-3).**
+2. **Audit-writer connection pool actually used (D-18).**
+3. **Role-gated rollback + policy CRUD update/delete (D-19, D-21).**
+4. **Multi-channel notifications:** Email + Web (D-23).
+5. **PII allowlist + reasoning quality eval (D-22).**
+6. **MS Graph token caching (D-24).**
+7. **Pick one: Okta connector or CrowdStrike isolate_host connector**
+   — depends on Q3 (design-partner ICP).
+8. **Per-tenant AI budget cap + cost surfacing.**
+9. **Frontend: policy editor UI, audit-chain explorer.**
+
+Carry-over: every prior-sprint D-item not closed above.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-13 | Phase 3 second execution connector — Okta or CrowdStrike?                                              | Sprint 3  |
+| OQ-14 | Audit-chain export format — JSONL signed receipt? PDF for compliance officers?                          | Sprint 3  |
+| OQ-15 | Should `requires_approval=false` ALLOW rules need a "training period" with shadow runs first?           | Sprint 3  |
+| OQ-16 | Policy editor UX — JSON editor with schema validation, or a visual rule builder?                        | Sprint 3  |
+| OQ-17 | Per-tenant AI budget cap — hard stop, soft warning + escalate, or both with separate thresholds?        | Sprint 3  |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 02 closeout
+
+> Sprint 00 + 01 strategy questions still stand. New ones surfaced by the
+> closed-loop work:
+
+### 1. The "first real action" demo moment
+
+The product is now demoable end-to-end. Q17 picked Microsoft Graph
+`revoke_user_sessions` — non-reversible by design. The first prospect
+demo will trigger it.
+
+  - **Q19.** Do we lead the demo with the non-reversible action (revoke)
+    or with a fully-reversible one (notify_slack, open_jira_ticket)? The
+    former is the dramatic moment; the latter is the trust posture. My
+    recommendation is **lead reversible, escalate to non-reversible at
+    Q&A** — proves "rollback-first" before forcing the prospect to
+    grapple with "the AI did the thing."
+
+### 2. The MITRE provenance question (OQ-10 redux)
+
+We now have both source-provided MITRE techniques (Defender's
+`mitreTechniques` field) and LLM-derived ones (in the structured
+output). The product currently stores them separately.
+
+  - **Q20.** Surface both in the UI side-by-side, or merge into one
+    "Aegis-attested" list with provenance metadata per technique? The
+    latter is cleaner for an analyst but obscures disagreement which is
+    itself a useful signal.
+
+### 3. The compliance-export wedge
+
+The audit chain is hash-verified, tamper-evident, append-only, and
+attributable to a specific AI model + prompt version. That's
+unusually rare in the SOC tool stack.
+
+  - **Q21.** Should Sprint 3 ship an **audit export endpoint** that
+    produces a signed JSONL receipt suitable for SOC 2 / ISO 27001
+    evidence collection? It's a Phase 3 wedge that doesn't show up on
+    most competitor checklists.
+
+### 4. The "approval inbox vs. ChatOps" question
+
+We built a web-based approval inbox. Slack also has approve/reject
+buttons inline. Most operators will live in Slack.
+
+  - **Q22.** Do we invest Sprint 3 effort in making the web inbox
+    feature-complete (filters, mobile, search) or push hard on
+    **Slack-first UX** — bringing the *incident detail* and *AI
+    reasoning panel* into Slack via modals + threads? The latter
+    reduces context-switching for the analyst, which IS the operational
+    pain point.
+
+### 5. Self-hosted vs. SaaS again (Q7 redux)
+
+Sprint 2 added MS Graph + Slack as outbound integrations. Both have
+self-hosted-friendly patterns (private workspace, customer's own AAD).
+
+  - **Q23.** With the closed loop working, the **on-prem demo for
+    regulated FinServ / Healthcare** is now feasible. Does that change
+    the design-partner conversation? Specifically: is the **first paid
+    customer** more likely to be a mid-market SaaS SOC (Slack-native,
+    SaaS-comfortable) or a regulated enterprise running on-prem?
+
+### 6. Pricing for autonomous actions specifically
+
+Sprint 1 raised pricing questions (per-alert, per-seat, per-action,
+flat). Sprint 2 makes the per-action axis concrete.
+
+  - **Q24.** Should an *autonomously-executed* action cost more than an
+    *approved-by-human* one? Pricing-wise the AI value is in the
+    autonomous path; operationally, the customer is paying for
+    governance trust whether the AI ran or a human did. Pick a frame.
+
+---
+
+> End of Sprint 02. Next entry: **Sprint 03 — Production posture.**

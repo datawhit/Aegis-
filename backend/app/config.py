@@ -71,6 +71,34 @@ class Settings(BaseSettings):
     # Sliding window for alert→incident clustering by correlation_key.
     incident_correlation_window_seconds: int = 1800
 
+    # --- Policy ---
+    # Emergency lockdown: force the always-escalate stub engine, ignoring
+    # any policies in the DB. Set true if a bad policy ships to prod and
+    # you need to revert to "ask a human for everything" immediately.
+    policy_engine_force_stub: bool = False
+
+    # --- Approval ---
+    approval_default_ttl_seconds: int = 3600
+    approval_required_role: str = "operator"
+
+    # --- Slack ---
+    slack_enabled: bool = False
+    slack_webhook_url: str = ""
+    slack_signing_secret: str = ""
+    slack_approval_channel: str = "#aegis-approvals"
+
+    # --- Microsoft Graph (execution connector) ---
+    ms_graph_live: bool = False
+    ms_graph_tenant_id: str = ""
+    ms_graph_client_id: str = ""
+    ms_graph_client_secret: str = ""
+
+    # --- Audit log immutability ---
+    # If set, the audit logger uses this DSN for INSERTs. The DB role
+    # backing this DSN should have ONLY INSERT on audit_logs. When unset,
+    # the app uses the regular pool (Phase 0 behavior).
+    audit_writer_database_url: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

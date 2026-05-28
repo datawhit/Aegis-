@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link } from "react-router-dom";
 import { getIncident } from "@/lib/incidents";
+import { rollbackRemediation } from "@/lib/approvals";
 import { SeverityBadge } from "@/components/incidents/SeverityBadge";
 import { AIReasoningPanel } from "@/components/incidents/AIReasoningPanel";
 
@@ -77,25 +79,7 @@ export default function IncidentDetailPage() {
         ) : (
           <ul className="space-y-2">
             {data.remediation_actions.map((r) => (
-              <li
-                key={r.id}
-                className="rounded border border-aegis-border bg-aegis-bg p-3 font-mono text-xs"
-              >
-                <div className="flex items-baseline justify-between">
-                  <span className="text-aegis-text">{r.action_class}</span>
-                  <span className="text-aegis-muted">{r.status}</span>
-                </div>
-                <div className="mt-1 text-aegis-muted">
-                  blast radius {r.blast_radius} · ai{" "}
-                  {r.ai_confidence === null
-                    ? "—"
-                    : `${Math.round(r.ai_confidence * 100)}%`}{" "}
-                  · rollback{" "}
-                  {r.rollback_plan
-                    ? `→ ${(r.rollback_plan.action_class as string) ?? "defined"}`
-                    : "none"}
-                </div>
-              </li>
+              <RemediationListItem key={r.id} remediation={r} incidentId={data.id} />
             ))}
           </ul>
         )}
@@ -120,5 +104,107 @@ export default function IncidentDetailPage() {
         </ul>
       </section>
     </article>
+  );
+}
+
+
+type RemediationItem = {
+  id: string;
+  action_class: string;
+  status: string;
+  blast_radius: number;
+  ai_confidence: number | null;
+  rollback_plan: Record<string, unknown> | null;
+  failure_reason: string | null;
+};
+
+function RemediationListItem({
+  remediation,
+  incidentId,
+}: {
+  remediation: RemediationItem;
+  incidentId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [reason, setReason] = useState("");
+  const [showRollback, setShowRollback] = useState(false);
+  const rollback = useMutation({
+    mutationFn: () => rollbackRemediation(remediation.id, reason),
+    onSuccess: () => {
+      setShowRollback(false);
+      setReason("");
+      queryClient.invalidateQueries({ queryKey: ["incident", incidentId] });
+    },
+  });
+  const canRollback =
+    remediation.status === "executed" && remediation.rollback_plan;
+
+  return (
+    <li className="rounded border border-aegis-border bg-aegis-bg p-3 font-mono text-xs">
+      <div className="flex items-baseline justify-between">
+        <span className="text-aegis-text">{remediation.action_class}</span>
+        <span className="text-aegis-muted">{remediation.status}</span>
+      </div>
+      <div className="mt-1 text-aegis-muted">
+        blast radius {remediation.blast_radius} · ai{" "}
+        {remediation.ai_confidence === null
+          ? "—"
+          : `${Math.round(remediation.ai_confidence * 100)}%`}{" "}
+        · rollback{" "}
+        {remediation.rollback_plan
+          ? `→ ${(remediation.rollback_plan.action_class as string) ?? "defined"}`
+          : "none"}
+      </div>
+      {remediation.failure_reason && (
+        <div className="mt-1 text-aegis-danger">
+          failure: {remediation.failure_reason}
+        </div>
+      )}
+      {canRollback && (
+        <div className="mt-2">
+          {!showRollback ? (
+            <button
+              type="button"
+              onClick={() => setShowRollback(true)}
+              className="rounded border border-aegis-border px-2 py-1 text-[10px] uppercase tracking-widest text-aegis-warn hover:bg-aegis-panel"
+            >
+              rollback
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Why are you rolling this back? (audited)"
+                rows={2}
+                className="block w-full rounded border border-aegis-border bg-aegis-panel p-2 text-aegis-text focus:border-aegis-accent focus:outline-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={!reason || rollback.isPending}
+                  onClick={() => rollback.mutate()}
+                  className="rounded bg-aegis-warn px-3 py-1 text-aegis-bg disabled:opacity-50"
+                >
+                  confirm rollback
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRollback(false)}
+                  className="rounded border border-aegis-border px-3 py-1 text-aegis-muted"
+                >
+                  cancel
+                </button>
+                {rollback.isError && (
+                  <span className="text-aegis-danger">
+                    {(rollback.error as Error).message}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
