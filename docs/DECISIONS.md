@@ -125,6 +125,120 @@
 
 ---
 
+## ADR-007 — AIProvider abstraction, Claude Sonnet 4.6 default
+
+- **Date:** 2026-05-27 (Sprint 01)
+- **Status:** Accepted
+- **Context:** The triage engine needs LLM access; the master prompt says
+  "Claude/OpenAI APIs" without picking one. Hardcoding either ties the
+  audit chain's `ai_reasoning_snapshots.provider` field to a specific
+  vendor's lifecycle (deprecations, pricing, rate-limit policies).
+- **Decision:** Define `AIProvider` as a protocol with a single method
+  (`triage_alert`) that returns a validated `TriageOutput`. Ship
+  `AnthropicAIProvider` using `claude-sonnet-4-6` + tool_use for
+  structured output. Stub `OpenAIAIProvider` so the provider selector
+  fails-loud on misconfig.
+- **Why Sonnet 4.6, not Opus:** Triage is high-volume per-alert
+  classification. Sonnet's cost profile is right for that workload at
+  the expected 1k–10k alerts/day; Opus is over-spec. We can route
+  *specific* low-volume / high-stakes flows (Sprint 3+ remediation
+  decision review) to Opus selectively without changing the abstraction.
+- **Provider failure modes:** schema-violating tool_use, refusals, network.
+  All three collapse to `AIProviderError` → TriageService synthesizes a
+  conservative fallback (severity=MEDIUM, confidence=NULL,
+  suggested_action_class=null). The policy engine ESCALATEs the result by
+  the ADR-005 invariants. No alert is ever silently dropped.
+- **Consequences:**
+  - + Provider swap is a one-line DI change; reasoning chain stays intact.
+  - + No alert is dropped on AI failure — we degrade to "ask a human".
+  - – We pay one Anthropic-SDK dependency. Acceptable; the SDK is small.
+
+---
+
+## ADR-008 — Aegis-canonical HMAC for webhook ingestion, replay-window 5 min
+
+- **Date:** 2026-05-27 (Sprint 01)
+- **Status:** Accepted (Phase 1 scope)
+- **Context:** Each source system (Defender, Okta, Slack…) has its own
+  webhook signing scheme. Supporting the native scheme for each source
+  means N implementations on day 1, and most of our customers will be
+  self-deployed in Phase 1 — they configure both ends.
+- **Decision:** Use an **Aegis-canonical** HMAC scheme for all sources in
+  Phase 1: SHA-256 over `f"{ts}." || raw_body` with a 5-minute replay
+  window. Per-source secret in env (`AEGIS_INGEST_SECRET_<SOURCE>`);
+  moves to DB / Vault in Phase 3 once we have multi-tenant + key rotation
+  pressure (D-10).
+- **Failure-mode policy:** All HMAC failures collapse to a single 401
+  without distinguishing reason in the response — log specifics
+  internally; do not leak which check failed. Rejections still produce an
+  audit-log entry so brute-force attempts show up in the chain.
+- **Alternatives considered:**
+  - **Native per-source schemes** (Defender JWTs, Okta HMAC, Slack v0
+    signing). Right answer at scale; wrong cost in Phase 1.
+  - **mTLS-only.** Strongest, but most of our pilot customers won't have
+    the cert ops chops. Revisit for enterprise contracts.
+- **Consequences:**
+  - + One implementation; testable; rotatable.
+  - – Adapter work needed in Phase 2 to accept native source schemes for
+    customers who can't have us in front of their webhooks.
+
+---
+
+## ADR-009 — Alert→Incident correlation via `correlation_key` + sliding window
+
+- **Date:** 2026-05-27 (Sprint 01)
+- **Status:** Accepted (Phase 1 cut)
+- **Context:** Once alerts ingest at scale, we need to cluster related
+  alerts into a single incident. The temptation is to build an
+  embeddings-based correlation engine on day 1; the cost is high and the
+  payoff is unclear before we see real customer data.
+- **Decision:** Phase 1 correlates by **`correlation_key`** (set by the
+  normalizer; e.g. `defender:incident:<id>`, or fallback hash of
+  `category + primary affected entity`) with a **sliding window** (default
+  30 min, configurable). New alerts whose `correlation_key` matches an
+  open incident in the window roll into that incident; otherwise create
+  new.
+- **Why this works for Phase 1:**
+  - Defender already does its own grouping via `incidentId` — we ride on
+    it where present and only fall back to our hash otherwise.
+  - The 30-minute window matches the duration of most real account-takeover
+    + lateral-movement chains in the public threat intel data.
+  - It's a *deterministic* rule, which makes it auditable and replay-safe.
+- **Migration path:** Phase 4 adds **embeddings-based correlation**
+  (pgvector index already enabled in Phase 0). The interface — "give the
+  service a new alert, get back an incident" — does not change. Internal
+  implementation does.
+- **Consequences:**
+  - + Trivial to understand, debug, and tune via one knob.
+  - – False splits when distinct campaigns share a primary entity (a
+    user). Acceptable in Phase 1; analytics in Phase 3 surface this rate.
+
+---
+
+## ADR-010 — Triage runs async via the WorkflowEngine, not inline on ingest
+
+- **Date:** 2026-05-27 (Sprint 01)
+- **Status:** Accepted
+- **Context:** The ingest endpoint receives webhooks. Sources expect
+  fast 2xx responses (Defender retries on >5s); running an LLM call
+  inline can blow the timeout, and a webhook-time LLM cost is also a DoS
+  vector (an attacker pumping crafted webhooks).
+- **Decision:** Ingest persists the alert + audit entry + submits a
+  `triage_alert` workflow run via `WorkflowEngine.submit()` — which is
+  **idempotent on `idempotency_key`**, so webhook redeliveries can't
+  double-charge AI. The actual triage happens in a Celery worker.
+- **Consequences:**
+  - + Ingest latency is bounded by DB + broker enqueue (~10ms).
+  - + DoS exposure on AI cost is bounded by Celery worker concurrency
+    (configurable per env).
+  - – Adds latency between "alert arrives" and "incident visible in UI".
+    Acceptable — operationally, MTTR is measured from human action, not
+    from row-creation timestamp.
+  - – Validates our `WorkflowEngine` abstraction end-to-end. This is the
+    first real workflow shipped. If pain shows up here, we revisit ADR-002.
+
+---
+
 ## ADR template (for future ADRs)
 
 ```

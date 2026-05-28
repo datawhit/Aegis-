@@ -57,10 +57,19 @@ class Settings(BaseSettings):
     okta_client_id: str = ""
     okta_client_secret: str = ""
 
-    # --- AI providers (unused in Phase 0) ---
+    # --- AI providers ---
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     default_ai_provider: Literal["anthropic", "openai"] = "anthropic"
+
+    # --- Ingestion secrets ---
+    # Per-source HMAC secrets. Moves to DB/Vault in Phase 3 (D-10).
+    ingest_secret_defender: str = "dev-defender-secret-change-me"
+    ingest_replay_window_seconds: int = 300
+
+    # --- Correlation ---
+    # Sliding window for alert→incident clustering by correlation_key.
+    incident_correlation_window_seconds: int = 1800
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -379,3 +379,333 @@ structurally.
 ---
 
 > End of Sprint 00. Next entry: **Sprint 01 — First end-to-end signal flow.**
+
+---
+
+## SPRINT 01 — FIRST END-TO-END SIGNAL FLOW
+
+- **DATE:** 2026-05-27
+- **STATUS:** Delivered. Awaiting review before Sprint 2 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Land the first full path: webhook → normalized alert → AI triage →
+incident → proposed remediation → policy eval → escalation. **No
+autonomous execution yet.** This sprint proves the pipeline is wired
+end-to-end before we trust it to take action.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- `POST /api/v1/ingest/{source}` with HMAC verification + replay window
+- Connector framework (`Connector` protocol, registry, HMAC verifier)
+- **Defender XDR connector** with normalization and entity extraction
+- `AIProvider` abstraction + Claude Sonnet 4.6 implementation
+  (tool_use for structured output)
+- `TriageService` composing provider + reasoning-snapshot persistence
+- `IncidentService` orchestrating triage → correlation → remediation
+  proposal → policy eval, all inside one transaction
+- Celery `workflows.triage_alert` task running the pipeline async
+- `GET /api/v1/incidents` (paginated) + `GET /incidents/{id}` (detail
+  with alerts, reasoning, remediation actions)
+- Frontend: real routing, login page, incidents list, incident detail
+  with AI reasoning panel and remediation proposal cards
+- Test suite: HMAC verifier, Defender normalizer, triage service with
+  fake AI provider (success + failure modes), end-to-end ingest
+
+Explicitly out of scope:
+
+- Executing remediation (Phase 1 stub policy escalates everything)
+- Slack/Jira notifications for escalations (Sprint 2)
+- Approval UI (Sprint 2)
+- Real policy DSL (Sprint 2)
+- DB-role-level audit immutability (Sprint 2, D-1)
+
+### SECURITY CONSIDERATIONS
+
+- **HMAC verification** is constant-time (`hmac.compare_digest`) with a
+  5-minute replay window. Rejections audit-logged so brute-force shows
+  up in the chain.
+- **HMAC failure mode is undifferentiated 401.** We log specifics
+  internally but never tell the caller *which* check failed.
+- **Idempotency:** alerts dedupe on `(source, source_event_id)`,
+  workflow runs dedupe on `idempotency_key`. Webhook redeliveries
+  cannot double-trigger AI calls.
+- **Triage is async.** Ingest endpoint returns ~10ms regardless of AI
+  cost; bounds DoS exposure on AI billing.
+- **AI failure mode is safe.** Provider errors collapse to a fallback
+  triage output with `confidence=NULL`, which the policy engine
+  ESCALATEs per the ADR-005 invariant. No alert is silently dropped.
+- **Reasoning snapshot is persisted *before* the next step.** If the
+  pipeline crashes mid-flow, the AI's evidence is already on the chain.
+- **PII redaction in prompts is NOT YET wired.** The Defender normalizer
+  hashes user identifiers for `correlation_key` (test asserts this),
+  but the prompt itself still receives raw entity values. Tracked as
+  D-11 — must land before any non-design-partner customer.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-007** AIProvider abstraction, Claude Sonnet 4.6 default
+- **ADR-008** Aegis-canonical HMAC for webhook ingestion, 5-minute replay
+- **ADR-009** Alert→Incident correlation via correlation_key + sliding window
+- **ADR-010** Triage runs async via the WorkflowEngine, not inline
+
+### FEATURES IMPLEMENTED
+
+| Feature                                          | Status   | Notes                                      |
+| ------------------------------------------------ | -------- | ------------------------------------------ |
+| Webhook ingest with HMAC + replay window         | ✅       | 401 audited; 401 reasons not leaked         |
+| Defender XDR connector + normalizer              | ✅       | Rides on `incidentId` for correlation       |
+| Connector registry                               | ✅       | Adding a source is one `register()` call   |
+| AIProvider protocol                              | ✅       |                                            |
+| AnthropicAIProvider (Claude Sonnet 4.6)          | ✅       | tool_use enforced via `tool_choice`         |
+| OpenAI provider stub                             | ✅       | Fails loud on misconfig                    |
+| TriageService                                    | ✅       | Snapshot persisted before return            |
+| IncidentService (correlate / propose / eval)     | ✅       | Single-transaction pipeline                 |
+| Celery `workflows.triage_alert` task             | ✅       | Idempotent on re-delivery (PENDING gate)   |
+| GET /incidents list + filters                    | ✅       |                                            |
+| GET /incidents/{id} detail                       | ✅       | Includes reasoning + remediation + alerts  |
+| Frontend routing + ProtectedRoute                | ✅       |                                            |
+| Login page                                       | ✅       |                                            |
+| Incidents list (10s refresh)                     | ✅       |                                            |
+| Incident detail w/ AI reasoning panel            | ✅       | Shows prompt template, tokens, latency     |
+| Tests: HMAC verifier (7 cases)                   | ✅       |                                            |
+| Tests: Defender normalizer (7 cases)             | ✅       |                                            |
+| Tests: TriageService (success + failure)         | ✅       | Uses FakeAIProvider                        |
+| Tests: ingest e2e (auth, dedup, audit chain)     | ✅       | Mocks Celery dispatch boundary             |
+
+### FILES CREATED (36)
+
+Backend — AI layer (5):
+- `backend/app/core/ai/__init__.py`, `base.py`, `anthropic_provider.py`,
+  `openai_stub.py`, `triage.py`
+
+Backend — ingestion (3):
+- `backend/app/core/ingestion/__init__.py`, `base.py`, `defender.py`
+
+Backend — services + workers + prompts (4):
+- `backend/app/services/__init__.py`, `incident_service.py`
+- `backend/app/workers/tasks/__init__.py`, `triage.py`
+- `backend/app/prompts/__init__.py`, `triage.py`
+
+Backend — API + schemas (6):
+- `backend/app/api/v1/ingest.py`, `incidents.py`
+- `backend/app/schemas/alert.py`, `incident.py`, `ai_reasoning.py`, `ingest.py`
+
+Backend — tests (7):
+- `backend/tests/fakes.py`, `tests/fixtures/__init__.py`,
+  `tests/fixtures/defender_alert.json`,
+  `tests/test_hmac_verifier.py`, `test_defender_normalizer.py`,
+  `test_triage_service.py`, `test_ingest_e2e.py`
+
+Frontend (11):
+- `frontend/src/lib/incidents.ts`, `lib/auth.ts`
+- `frontend/src/components/incidents/{SeverityBadge,IncidentRow,AIReasoningPanel}.tsx`
+- `frontend/src/components/layout/AppShell.tsx`
+- `frontend/src/pages/{LoginPage,IncidentsListPage,IncidentDetailPage}.tsx`
+
+### FILES MODIFIED (8)
+
+- `backend/pyproject.toml` — add `anthropic==0.39.0`
+- `backend/app/config.py` — add ingestion + correlation settings
+- `backend/app/api/v1/router.py` — include ingest + incidents routers
+- `backend/app/workers/celery_app.py` — `include=["app.workers.tasks"]`
+- `backend/tests/conftest.py` — add `db_session` rollback fixture
+- `frontend/src/App.tsx` — replace with real routing + ProtectedRoute
+- `.env.example` — add ingestion + correlation env vars
+- `docs/DECISIONS.md` — ADRs 007–010
+
+### DATABASE CHANGES
+
+**None.** The Phase 0 schema was designed for this work. Zero migrations
+needed — the abstractions did the job they were meant to do.
+
+### API CHANGES
+
+| Method | Path                          | Auth     | Description                                       |
+| ------ | ----------------------------- | -------- | ------------------------------------------------- |
+| POST   | `/api/v1/ingest/{source}`     | HMAC     | Ingest webhook for a configured source            |
+| GET    | `/api/v1/incidents`           | bearer   | Paginated list with optional `status`/`severity`  |
+| GET    | `/api/v1/incidents/{id}`      | bearer   | Detail incl. alerts, reasoning, remediation       |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                       | Owed-by Sprint |
+| ---- | ------------------------------------------------------------------------------------------ | -------------- |
+| D-10 | Move per-source HMAC secrets from env → DB/Vault (multi-tenant + rotation)                | Sprint 3       |
+| D-11 | **PII redaction in AI prompts** (entity values currently sent as-is)                       | Sprint 2       |
+| D-12 | Reconciler for orphaned `PENDING` workflow_runs (broker hiccups)                            | Sprint 2       |
+| D-13 | Eager-load incidents detail in one query (currently 3 round-trips per detail GET)           | Sprint 2       |
+| D-14 | Defender connector tested against fixtures only — no live signed-payload test yet           | Sprint 2       |
+| D-15 | Frontend has no error boundary; a render error kills the whole shell                        | Sprint 1.5     |
+| D-16 | `anthropic` SDK error taxonomy not fully mapped (rate-limit vs auth vs 5xx all → fallback)  | Sprint 2       |
+
+(Phase 0 debt still open: D-1, D-2, D-3, D-4, D-5, D-6, D-7, D-8, D-9.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                 | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ---------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-7  | Anthropic API outage stalls ALL triage; the fallback path produces noisy ESCALATE storms             | Medium     | High     | Add a circuit breaker + queue-depth metric in Sprint 2; consider OpenAI failover |
+| R-8  | Defender's payload schema changes (MS rolls a v3); normalizer breaks silently                        | Low–Medium | High     | Sprint 2 adds a contract test using `mitreTechniques` field presence as canary    |
+| R-9  | The `correlation_key` fallback hash can collide across distinct campaigns sharing an entity          | Medium     | Medium   | Phase 4 embedding correlation; in the interim, surface false-merge rate in UI    |
+| R-10 | Sliding-window correlation creates a "first-30-min" cliff — a related alert at minute 31 starts new  | High       | Low      | Acceptable for Phase 1; tunable via env; analytics surface the distribution      |
+| R-11 | Token cost on triage scales linearly with alert volume — no current cap per tenant                   | High       | Medium   | Sprint 3 adds per-tenant daily cap + alert prioritization                        |
+| R-12 | Audit chain insert serializes on the tip lock; under sustained ingest could become hot               | Medium     | Medium   | Already flagged as R-3 in Sprint 00; revisit before any customer pushes >100 alerts/sec |
+
+### ROLLBACK STRATEGY
+
+- **Schema:** no migrations this sprint; rollback is purely application
+  code (`git revert`).
+- **Env:** new env keys are optional (defaults set in code). Removing them
+  leaves the system functional minus the connector.
+- **Feature flag:** the ingest endpoint is dispatch-by-source; removing
+  `DefenderConnector` from the registry effectively disables Defender
+  ingestion without other side effects.
+
+### KNOWN LIMITATIONS
+
+1. **No remediation execution.** Sprint 1 ends at proposal +
+   ESCALATE — the policy engine still has no `ALLOW` rule.
+2. **No notification of escalations** to Slack / pager. Escalations are
+   visible only in the UI.
+3. **No approval flow.** The `approvals` table is unused this sprint.
+4. **No PII redaction in prompts** (D-11).
+5. **AI reasoning panel does not show the prompt itself**, only the
+   structured output. Will add a "show prompt" disclosure in Sprint 2 —
+   the prompt is persisted; we just need to surface it.
+6. **Frontend has no error boundary** (D-15).
+7. **Live AI calls are not exercised in CI** — the e2e test mocks Celery
+   dispatch (so the worker doesn't run) and the TriageService tests use
+   FakeAIProvider. Live integration test against Claude is a manual /
+   nightly job (D-16-related).
+
+### OBSERVABILITY (current state)
+
+- **Logs:** every step on the triage pipeline writes a structured event
+  (`ingest.hmac_failed`, `ingest.duplicate`, `triage.recorded`,
+  `incident.handled`, `workflow.submit`, `policy.eval.*`).
+- **Audit chain:** entries for `alert.ingested`, `ingest.rejected`,
+  `incident.created`, `incident.alert_linked`, `remediation.proposed`,
+  `policy.evaluated`, `workflow.triage_completed`.
+- **Metrics / traces:** still not wired (planned Sprint 3).
+
+### NEXT STEPS — Sprint 02 candidate scope
+
+Working title: **"Closed-loop with a human in it."**
+
+Proposed objective: an escalation results in a Slack-delivered approval
+request → a user approves → the workflow engine executes a real
+remediation (the first real connector: Microsoft Graph for
+`revoke_user_sessions`) → rollback is invoked on demand and the chain
+records all of it.
+
+Specifically:
+
+1. **Real policy DSL** (D-2) — JSON-based rules first; CEL/Cedar evaluated
+   in a spike alongside.
+2. **Approval flow.** Slack-delivered request with approve/reject buttons
+   (Slack interactive components). `approvals` table comes alive.
+3. **First execution connector.** Microsoft Graph
+   `users/{id}/revokeSignInSessions`. Idempotent. Rollback is no-op (it's
+   not reversible) — so this action class requires explicit approval
+   even at high confidence.
+4. **PII redaction in prompts** (D-11) before any non-fixture data flows.
+5. **Audit-chain verifier** (D-5) as a Celery beat task; alert on Slack
+   on mismatch.
+6. **DB role for audit log immutability** (D-1, ADR-006).
+7. **Frontend:** approval inbox, action review page with rollback button.
+8. **Test:** end-to-end approval → execution → rollback → chain
+   verification.
+
+Carry-over backlog from Phase 0/1: D-3, D-6, D-7, D-8, D-9, D-10, D-12,
+D-13, D-14, D-15, D-16.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                      | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-8  | What's the canonical action class for our **first** remediation (`revoke_user_sessions` is my default — confirm)? | Sprint 2  |
+| OQ-9  | Approval channel — Slack only in Sprint 2, or Slack + Email + Web UI in parallel?                             | Sprint 2  |
+| OQ-10 | For `mitreTechniques` from Defender vs Aegis's own LLM-derived mapping — which wins? Both? Audit both?         | Sprint 2  |
+| OQ-11 | Should the AI's prompt itself be visible in the analyst UI, or only the structured output?                    | Sprint 2  |
+| OQ-12 | Do we ship a per-tenant daily AI-budget cap in Sprint 3, or push it to a Phase 4 pricing milestone?           | Sprint 3  |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 01 closeout
+
+> Sprint 00's 12 questions still stand — Q3 (design-partner profile) and
+> Q6 (compliance certification posture) remain the highest-leverage. Below
+> are the *new* questions that surfaced as we built Sprint 01.
+
+### 1. The "shadow mode" question is now urgent
+
+Sprint 1 ended at "AI proposes; policy engine escalates". Before we add
+autonomous execution (Sprint 2's wedge), the customer-facing posture has
+to be decided.
+
+  - **Q13.** Do we ship Sprint 2 with **shadow mode by default** — i.e.,
+    the system always escalates regardless of what policies allow, and
+    customers opt into autonomous execution per action class? This is
+    the trust-building posture; it also delays autonomous-execution
+    revenue. The alternative — opt-out — is faster to monetize and
+    riskier.
+
+### 2. AI provider risk concentration
+
+ADR-007 commits to Anthropic Claude as the Phase 1 provider. R-7 flags
+the outage risk.
+
+  - **Q14.** What's the contractual exposure if Anthropic has a 4-hour
+    outage during a customer's incident? Is "you're SOC for the duration
+    of an outage" a defensible position for an MSSP customer, or do we
+    need to ship multi-provider failover in Sprint 3?
+
+### 3. The "audit chain as product" question
+
+The hash-chained audit log is shipped and working. It's also currently
+internal infrastructure with no customer-facing surface.
+
+  - **Q15.** Is the audit chain a **marketable artifact** — i.e., do we
+    sell "you can export a cryptographically-verifiable transcript of
+    every AI decision to your compliance officer" as a feature in
+    Sprint 3? It's a differentiator against incumbents who track AI
+    decisions in best-effort logs.
+
+### 4. The "explainability tax"
+
+Every triage call persists prompt + evidence + structured output. At
+scale, this is a non-trivial storage cost (kilobytes per alert × ~5k
+alerts/day per customer × retention years).
+
+  - **Q16.** Retention policy: 90 days hot in Postgres, then archive to
+    S3 with content-addressed pointers? Or full retention in Postgres
+    until the customer asks for an export?
+
+### 5. The connector-strategy fork
+
+Sprint 2 needs a first **execution** connector (not just ingestion). The
+choice shapes the customer's first "wow" moment.
+
+  - **Q17.** Are we building Microsoft Graph (`revoke_user_sessions`)
+    first — broadest enterprise reach? Okta (same action, more SaaS-native
+    feel)? Or CrowdStrike `isolate_host` (most dramatic visible action,
+    biggest demo punch, but limits ICP)?
+
+### 6. Pricing for the LLM cost pass-through
+
+Triage cost is now a real line item: ~$0.005–$0.02 per alert on Sonnet 4.6
+depending on payload size.
+
+  - **Q18.** Do we **pass through** AI cost transparently, **absorb** it
+    into seat pricing, or **cap** it per tenant with overage billing?
+    Each implies a different sales conversation and a different product
+    visibility on the cost surface.
+
+---
+
+> End of Sprint 01. Next entry: **Sprint 02 — Closed-loop with a human in it.**

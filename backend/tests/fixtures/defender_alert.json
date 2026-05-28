@@ -1,0 +1,33 @@
+{
+  "alertId": "da637814123456789012_1234567890",
+  "incidentId": "3142",
+  "title": "Suspicious sign-in followed by mailbox forwarding rule",
+  "category": "InitialAccess",
+  "severity": "High",
+  "status": "New",
+  "determination": "Unknown",
+  "classification": "Unknown",
+  "createdDateTime": "2026-05-27T18:42:15.123Z",
+  "lastActivityDateTime": "2026-05-27T18:51:02.000Z",
+  "description": "An impossible-travel sign-in from a previously unseen IP was followed within 9 minutes by the creation of an inbox forwarding rule to an external address.",
+  "productName": "Microsoft Defender XDR",
+  "detectorId": "aad-impossibletravel-v2",
+  "mitreTechniques": ["T1078", "T1114.003"],
+  "evidence": [
+    {
+      "@odata.type": "#microsoft.graph.security.userEvidence",
+      "userPrincipalName": "kara.lin@aegis-demo.test",
+      "accountName": "kara.lin",
+      "userAccountType": "MemberAccount"
+    },
+    {
+      "@odata.type": "#microsoft.graph.security.ipEvidence",
+      "ipAddress": "203.0.113.42",
+      "countryLetterCode": "RO"
+    },
+    {
+      "@odata.type": "#microsoft.graph.security.urlEvidence",
+      "url": "https://exfil-rule.example/forward"
+    }
+  ]
+}

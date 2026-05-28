@@ -18,9 +18,7 @@ celery_app = Celery(
     "aegis",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    # Lazy import so failures in app submodules don't crash the worker
-    # before it can log them.
-    include=[],
+    include=["app.workers.tasks"],
 )
 
 celery_app.conf.update(
