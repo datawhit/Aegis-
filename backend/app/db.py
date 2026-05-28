@@ -32,10 +32,39 @@ SessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     autoflush=False,
 )
 
+if settings.audit_writer_database_url:
+    audit_writer_engine = create_async_engine(
+        settings.audit_writer_database_url,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+        echo=False,
+    )
+    AuditWriterSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
+        bind=audit_writer_engine,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+else:
+    audit_writer_engine = None
+    AuditWriterSessionLocal = None
+
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency that yields an async session per request."""
     async with SessionLocal() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+
+
+@asynccontextmanager
+async def get_audit_writer_session() -> AsyncIterator[AsyncSession]:
+    if AuditWriterSessionLocal is None:
+        raise RuntimeError("AEGIS_AUDIT_WRITER_DATABASE_URL must be set to use the audit writer pool")
+    async with AuditWriterSessionLocal() as session:
         try:
             yield session
         except Exception:

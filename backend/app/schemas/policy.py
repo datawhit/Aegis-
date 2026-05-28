@@ -32,5 +32,15 @@ class PolicyCreate(BaseModel):
     is_active: bool = True
 
 
+class PolicyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    description: str | None = None
+    priority: int | None = None
+    effect: str | None = Field(default=None, pattern=r"^(allow|escalate|deny)$")
+    match: dict | None = None
+    constraints: dict | None = None
+    is_active: bool | None = None
+
+
 class PolicyList(BaseModel):
     items: list[PolicyRead]

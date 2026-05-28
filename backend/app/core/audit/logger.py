@@ -27,6 +27,8 @@ from typing import Any, Protocol, runtime_checkable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
+from app.db import get_audit_writer_session
 from app.logging import get_logger
 from app.models.audit_log import ActorType, AuditLog
 
@@ -95,43 +97,59 @@ class HashChainAuditLogger(AuditLogger):
         # resource_type, resource_id, payload, reasoning_snapshot_id) — i.e.
         # everything except the timestamp. Verification re-derives the same
         # canonical payload from these stored fields.
-        entry = AuditLog(
-            actor_type=actor.type,
-            actor_id=actor.id,
-            actor_label=actor.label,
-            action=action,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            payload=payload,
-            reasoning_snapshot_id=reasoning_snapshot_id,
-            prev_hash=prev_hash,
-            entry_hash="pending",   # replaced below
-        )
-        entry.entry_hash = _compute_entry_hash(
-            prev_hash=prev_hash,
-            actor_type=actor.type.value,
-            actor_id=str(actor.id) if actor.id else None,
-            actor_label=actor.label,
-            action=action,
-            resource_type=resource_type,
-            resource_id=str(resource_id) if resource_id else None,
-            payload=payload,
-            reasoning_snapshot_id=str(reasoning_snapshot_id) if reasoning_snapshot_id else None,
-        )
+        async def _write(audit_session: AsyncSession) -> AuditLog:
+            result = await audit_session.execute(
+                select(AuditLog)
+                .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+                .limit(1)
+                .with_for_update()
+            )
+            tip = result.scalar_one_or_none()
+            prev_hash = tip.entry_hash if tip is not None else None
 
-        session.add(entry)
-        await session.flush()
-        log.info(
-            "audit.recorded",
-            entry_id=str(entry.id),
-            actor_type=actor.type.value,
-            actor_id=str(actor.id) if actor.id else None,
-            action=action,
-            resource_type=resource_type,
-            resource_id=str(resource_id) if resource_id else None,
-            entry_hash=entry.entry_hash,
-        )
-        return entry
+            entry = AuditLog(
+                actor_type=actor.type,
+                actor_id=actor.id,
+                actor_label=actor.label,
+                action=action,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                payload=payload,
+                reasoning_snapshot_id=reasoning_snapshot_id,
+                prev_hash=prev_hash,
+                entry_hash="pending",   # replaced below
+            )
+            entry.entry_hash = _compute_entry_hash(
+                prev_hash=prev_hash,
+                actor_type=actor.type.value,
+                actor_id=str(actor.id) if actor.id else None,
+                actor_label=actor.label,
+                action=action,
+                resource_type=resource_type,
+                resource_id=str(resource_id) if resource_id else None,
+                payload=payload,
+                reasoning_snapshot_id=str(reasoning_snapshot_id) if reasoning_snapshot_id else None,
+            )
+
+            audit_session.add(entry)
+            await audit_session.flush()
+            log.info(
+                "audit.recorded",
+                entry_id=str(entry.id),
+                actor_type=actor.type.value,
+                actor_id=str(actor.id) if actor.id else None,
+                action=action,
+                resource_type=resource_type,
+                resource_id=str(resource_id) if resource_id else None,
+                entry_hash=entry.entry_hash,
+            )
+            return entry
+
+        if settings.audit_writer_database_url:
+            async with get_audit_writer_session() as audit_session:
+                return await _write(audit_session)
+
+        return await _write(session)
 
 
 def _compute_entry_hash(

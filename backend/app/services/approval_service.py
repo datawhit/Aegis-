@@ -26,7 +26,7 @@ from app.logging import get_logger
 from app.models.approval import Approval, ApprovalState
 from app.models.incident import Incident
 from app.models.remediation_action import RemediationAction, RemediationStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 
 log = get_logger("services.approval")
 
@@ -36,6 +36,10 @@ class ApprovalNotFoundError(LookupError):
 
 
 class ApprovalNotPendingError(RuntimeError):
+    pass
+
+
+class ApprovalUnauthorizedError(PermissionError):
     pass
 
 
@@ -145,6 +149,11 @@ class ApprovalService:
                 )
             )
         ).scalar_one()
+
+        if actor.role != UserRole.ADMIN and actor.role.value != approval.requested_role:
+            raise ApprovalUnauthorizedError(
+                "user role is not permitted to decide this approval"
+            )
 
         approval.state = ApprovalState.APPROVED if approve else ApprovalState.REJECTED
         approval.decided_by_user_id = actor.id

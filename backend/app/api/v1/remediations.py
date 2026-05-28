@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import CurrentUserDep, SessionDep
+from app.models.user import UserRole
 from app.schemas.remediation import RollbackRequest
 from app.services.remediation_executor import (
     RemediationNotExecutableError,
@@ -23,6 +24,12 @@ async def rollback_remediation(
     session: SessionDep,
     current_user: CurrentUserDep,
 ) -> dict:
+    if current_user.role not in {UserRole.ADMIN, UserRole.OPERATOR}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="operator or admin role required to rollback remediations",
+        )
+
     executor = get_remediation_executor()
     try:
         outcome = await executor.rollback(

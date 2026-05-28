@@ -20,6 +20,7 @@ from app.schemas.approval import (
 from app.services.approval_service import (
     ApprovalNotFoundError,
     ApprovalNotPendingError,
+    ApprovalUnauthorizedError,
     get_approval_service,
 )
 
@@ -87,6 +88,11 @@ async def decide_approval(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="approval not found",
+        ) from exc
+    except ApprovalUnauthorizedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
         ) from exc
     except ApprovalNotPendingError as exc:
         raise HTTPException(

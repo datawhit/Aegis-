@@ -24,6 +24,7 @@ References:
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -43,6 +44,10 @@ _ROLLBACK_SUPPORTED: set[str] = set()
 
 class MicrosoftGraphConnector(ExecutionConnector):
     name = "microsoft_graph"
+
+    def __init__(self) -> None:
+        self._cached_token: str | None = None
+        self._cached_token_expires_at: datetime | None = None
 
     def supports(self, action_class: str) -> bool:
         return action_class in _SUPPORTED
@@ -138,6 +143,11 @@ class MicrosoftGraphConnector(ExecutionConnector):
 
     # ---- internals ----------------------------------------------------------
     async def _access_token(self) -> str:
+        now = datetime.now(UTC)
+        if self._cached_token and self._cached_token_expires_at:
+            if now < self._cached_token_expires_at - timedelta(seconds=30):
+                return self._cached_token
+
         if not (
             settings.ms_graph_tenant_id
             and settings.ms_graph_client_id
@@ -165,6 +175,14 @@ class MicrosoftGraphConnector(ExecutionConnector):
         token = body.get("access_token")
         if not token:
             raise _GraphError("token response missing access_token")
+
+        expires_in = body.get("expires_in")
+        if isinstance(expires_in, int) and expires_in > 0:
+            self._cached_token_expires_at = now + timedelta(seconds=expires_in)
+        else:
+            self._cached_token_expires_at = now + timedelta(minutes=5)
+
+        self._cached_token = token
         return token
 
 

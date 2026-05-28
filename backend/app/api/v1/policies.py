@@ -5,14 +5,21 @@ ship in Phase 3 alongside the policy UI.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+import uuid
+
+from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUserDep, SessionDep
 from app.core.policy.dsl import PolicyDSLError, context_from_request, evaluate_match
 from app.models.policy import Policy, PolicyEffect as ORMPolicyEffect
 from app.models.user import UserRole
-from app.schemas.policy import PolicyCreate, PolicyList, PolicyRead
+from app.schemas.policy import (
+    PolicyCreate,
+    PolicyList,
+    PolicyRead,
+    PolicyUpdate,
+)
 
 router = APIRouter()
 
@@ -38,6 +45,94 @@ async def list_policies(
         )
     ).scalars().all()
     return PolicyList(items=[PolicyRead.model_validate(p) for p in rows])
+
+
+@router.get("/policies/{policy_id}", response_model=PolicyRead)
+async def get_policy(
+    policy_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+) -> PolicyRead:
+    _require_admin(current_user)
+    policy = (
+        await session.execute(select(Policy).where(Policy.id == policy_id))
+    ).scalar_one_or_none()
+    if policy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="policy not found")
+    return PolicyRead.model_validate(policy)
+
+
+@router.put("/policies/{policy_id}", response_model=PolicyRead)
+async def update_policy(
+    policy_id: uuid.UUID,
+    body: PolicyUpdate,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+) -> PolicyRead:
+    _require_admin(current_user)
+    policy = (
+        await session.execute(select(Policy).where(Policy.id == policy_id))
+    ).scalar_one_or_none()
+    if policy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="policy not found")
+
+    update_data = body.model_dump(exclude_unset=True)
+    if "match" in update_data:
+        try:
+            evaluate_match(
+                update_data["match"],
+                context_from_request(
+                    {
+                        "action_class": "revoke_user_sessions",
+                        "blast_radius": 1,
+                        "ai_confidence": 0.9,
+                        "incident_severity": "high",
+                        "has_rollback_plan": True,
+                    }
+                ),
+            )
+        except PolicyDSLError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid DSL: {exc}",
+            ) from exc
+
+    if "name" in update_data and update_data["name"] != policy.name:
+        existing = (
+            await session.execute(
+                select(Policy).where(Policy.name == update_data["name"], Policy.id != policy.id)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"policy with name {update_data['name']!r} already exists",
+            )
+
+    for field, value in update_data.items():
+        setattr(policy, field, value)
+
+    await session.flush()
+    await session.commit()
+    return PolicyRead.model_validate(policy)
+
+
+@router.delete("/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_policy(
+    policy_id: uuid.UUID,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+) -> Response:
+    _require_admin(current_user)
+    policy = (
+        await session.execute(select(Policy).where(Policy.id == policy_id))
+    ).scalar_one_or_none()
+    if policy is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="policy not found")
+    await session.delete(policy)
+    await session.flush()
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/policies", response_model=PolicyRead, status_code=status.HTTP_201_CREATED)
