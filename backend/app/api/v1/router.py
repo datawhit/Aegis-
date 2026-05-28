@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     approvals,
     auth,
+    audit,
     health,
     incidents,
     ingest,
@@ -22,4 +23,5 @@ api_router.include_router(incidents.router, tags=["incidents"])
 api_router.include_router(approvals.router, tags=["approvals"])
 api_router.include_router(remediations.router, tags=["remediations"])
 api_router.include_router(policies.router, tags=["policies"])
+api_router.include_router(audit.router, tags=["audit"])
 api_router.include_router(slack.router, tags=["slack"])

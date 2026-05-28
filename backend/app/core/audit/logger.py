@@ -147,7 +147,9 @@ class HashChainAuditLogger(AuditLogger):
 
         if settings.audit_writer_database_url:
             async with get_audit_writer_session() as audit_session:
-                return await _write(audit_session)
+                result = await _write(audit_session)
+                await audit_session.commit()
+                return result
 
         return await _write(session)
 
