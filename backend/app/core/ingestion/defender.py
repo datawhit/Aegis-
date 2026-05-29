@@ -20,6 +20,7 @@ What we extract:
 References (current as of Defender XDR docs):
   https://learn.microsoft.com/en-us/defender-xdr/api-incidents
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -140,9 +141,7 @@ def _extract_indicators(raw: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in out.items() if v}
 
 
-def _correlation_key(
-    raw: dict[str, Any], *, category: str, affected: dict[str, Any]
-) -> str | None:
+def _correlation_key(raw: dict[str, Any], *, category: str, affected: dict[str, Any]) -> str | None:
     # Prefer Defender's own incidentId — we ride on their grouping.
     if incident_id := raw.get("incidentId"):
         return f"defender:incident:{incident_id}"
@@ -159,7 +158,9 @@ def _correlation_key(
     if pivot is None:
         return None
     payload = f"defender:{category}:{pivot}".lower()
-    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:32]
+    # SHA-1 here is a non-cryptographic clustering key (correlation_key);
+    # we just need a stable 32-char hex digest of the canonical pivot.
+    return hashlib.sha1(payload.encode(), usedforsecurity=False).hexdigest()[:32]
 
 
 def _excerpt(raw: dict[str, Any]) -> dict[str, Any]:

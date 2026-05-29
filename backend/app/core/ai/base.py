@@ -12,6 +12,7 @@ Constraints encoded here that all providers must honor:
   the `TriageService` does that, *after* the response is in hand. This
   keeps the provider trivially replaceable and easy to mock.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -57,8 +58,8 @@ class TriageOutput(BaseModel):
 class TriageRequest:
     alert_id: uuid.UUID
     source: str
-    normalized: dict          # the canonical alert payload
-    raw_event_excerpt: dict   # a trimmed view of the raw event (for context)
+    normalized: dict  # the canonical alert payload
+    raw_event_excerpt: dict  # a trimmed view of the raw event (for context)
 
 
 @dataclass

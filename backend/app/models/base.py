@@ -1,4 +1,5 @@
 """Declarative base + shared column conventions."""
+
 from __future__ import annotations
 
 import uuid

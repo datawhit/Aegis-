@@ -1,9 +1,10 @@
 """TriageService — verifies the contract:
 
-  - reasoning snapshot is persisted before the function returns
-  - confidence is reflected in the snapshot
-  - AI failure → fallback output + null confidence + ai_failed=True
+- reasoning snapshot is persisted before the function returns
+- confidence is reflected in the snapshot
+- AI failure → fallback output + null confidence + ai_failed=True
 """
+
 from __future__ import annotations
 
 import uuid

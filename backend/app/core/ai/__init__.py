@@ -5,6 +5,7 @@ impl is chosen via `AEGIS_DEFAULT_AI_PROVIDER`. The protocol is deliberately
 narrow (one method: `triage_alert`) so we can swap providers without rewriting
 the call sites — same play as the WorkflowEngine / IdentityProvider seams.
 """
+
 from app.config import settings
 from app.core.ai.anthropic_provider import AnthropicAIProvider
 from app.core.ai.base import (

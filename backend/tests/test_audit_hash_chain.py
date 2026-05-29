@@ -7,6 +7,7 @@ the DB and prove that:
   2. Changing any input field changes the hash.
   3. JSON canonicalization is order-insensitive for dict keys.
 """
+
 from __future__ import annotations
 
 from app.core.audit.logger import _compute_entry_hash

@@ -1,4 +1,5 @@
 """Policy DSL evaluator — covers each operator and the failure-mode contract."""
+
 from __future__ import annotations
 
 import pytest

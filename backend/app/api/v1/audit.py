@@ -5,9 +5,11 @@ line that binds (a) the exported range, (b) the SHA-256 of all exported
 entry hashes, (c) the chain tip at export time. See
 `app.core.audit.export_signer` for the format and verification path.
 """
+
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -72,9 +74,7 @@ async def export_audit(
     # export references its own request.
     tip_row = (
         await session.execute(
-            select(AuditLog)
-            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-            .limit(1)
+            select(AuditLog).order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(1)
         )
     ).scalar_one_or_none()
     snapshot_until = tip_row.created_at if tip_row is not None else None
@@ -117,7 +117,7 @@ async def export_audit(
     if snapshot_until is not None:
         stmt = stmt.where(AuditLog.created_at <= snapshot_until)
 
-    async def stream_rows():
+    async def stream_rows() -> AsyncIterator[str]:
         entry_hashes: list[str] = []
         head_entry_hash: str | None = None
         count = 0
@@ -150,9 +150,7 @@ async def export_audit(
         )
         yield json.dumps(receipt, ensure_ascii=False) + "\n"
 
-    headers = {
-        "Content-Disposition": "attachment; filename=audits_export.ndjson"
-    }
+    headers = {"Content-Disposition": "attachment; filename=audits_export.ndjson"}
     return StreamingResponse(
         stream_rows(),
         media_type="application/x-ndjson",

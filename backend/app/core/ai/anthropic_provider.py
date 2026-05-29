@@ -8,6 +8,7 @@ Phase 1 model: `claude-sonnet-4-6`. Rationale (ADR-007):
   flows (e.g., remediation-decision review in Phase 2).
 - Anthropic SDK is async-first; matches the rest of the stack.
 """
+
 from __future__ import annotations
 
 import time
@@ -51,9 +52,7 @@ class AnthropicAIProvider(AIProvider):
 
     async def triage_alert(self, request: TriageRequest) -> TriageResult:
         if self._client is None:
-            raise AIProviderError(
-                "Anthropic API key is not configured. Set ANTHROPIC_API_KEY."
-            )
+            raise AIProviderError("Anthropic API key is not configured. Set ANTHROPIC_API_KEY.")
 
         user_prompt = render_user_prompt(
             source=request.source,
@@ -63,7 +62,7 @@ class AnthropicAIProvider(AIProvider):
 
         started = time.monotonic()
         try:
-            message = await self._client.messages.create(
+            message = await self._client.messages.create(  # type: ignore[call-overload]
                 model=self._model,
                 max_tokens=_MAX_TOKENS,
                 system=TRIAGE_SYSTEM_PROMPT,
@@ -85,7 +84,7 @@ class AnthropicAIProvider(AIProvider):
         raw_response_blocks: list[str] = []
         for block in message.content:
             if block.type == "tool_use" and block.name == "triage_alert":
-                tool_input = block.input  # type: ignore[assignment]
+                tool_input = block.input
             elif block.type == "text":
                 raw_response_blocks.append(block.text)
 

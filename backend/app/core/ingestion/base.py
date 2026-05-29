@@ -17,6 +17,7 @@ sources — sufficient for a self-managed deployment where customers
 configure both ends. Connector-native verification (e.g., Defender's
 `aud`-tied JWTs) ships in Phase 2 once we have a real customer to test against.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -43,10 +44,10 @@ class NormalizedAlert:
     source: str
     source_event_id: str
     correlation_key: str | None
-    severity_hint: str        # source-reported severity, mapped to our scale
+    severity_hint: str  # source-reported severity, mapped to our scale
     category: str
     title: str
-    occurred_at: str          # ISO 8601 UTC
+    occurred_at: str  # ISO 8601 UTC
     affected_entities: dict[str, Any] = field(default_factory=dict)
     indicators: dict[str, Any] = field(default_factory=dict)
     raw_event_excerpt: dict[str, Any] = field(default_factory=dict)
@@ -83,7 +84,7 @@ def verify_hmac(
         raise HMACVerificationError("unsupported signature algorithm")
 
     provided = signature_header.removeprefix("sha256=").strip()
-    message = f"{ts}.".encode("utf-8") + raw_body
+    message = f"{ts}.".encode() + raw_body
     expected = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(provided, expected):

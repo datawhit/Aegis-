@@ -4,6 +4,7 @@ Tracked in Postgres so the API can answer status queries without depending
 on the engine's internal state store. The engine itself (Celery in Phase 0)
 writes lifecycle transitions here.
 """
+
 from __future__ import annotations
 
 import enum
@@ -11,7 +12,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPKMixin

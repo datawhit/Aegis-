@@ -3,6 +3,7 @@
 Phase 2: list + create are sufficient for demo + tests. Update / delete
 ship in Phase 3 alongside the policy UI.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -50,10 +51,10 @@ async def list_policies(
 ) -> PolicyList:
     _require_admin_or_reviewer(current_user)
     rows = (
-        await session.execute(
-            select(Policy).order_by(Policy.priority.desc(), Policy.name.asc())
-        )
-    ).scalars().all()
+        (await session.execute(select(Policy).order_by(Policy.priority.desc(), Policy.name.asc())))
+        .scalars()
+        .all()
+    )
     return PolicyList(items=[PolicyRead.model_validate(p) for p in rows])
 
 

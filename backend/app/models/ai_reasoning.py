@@ -5,13 +5,15 @@ model, the prompt, the evidence it considered, the policies it referenced,
 its confidence, and the structured output. This is the foundation of the
 "explainability" leg of the product.
 """
+
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, String, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, UUIDPKMixin
@@ -26,9 +28,9 @@ class AIReasoningSnapshot(Base, UUIDPKMixin):
         nullable=False,
     )
 
-    # Provenance
-    provider: Mapped[str] = mapped_column(String(32), nullable=False)         # "anthropic", "openai"
-    model: Mapped[str] = mapped_column(String(128), nullable=False)           # exact model ID
+    # Provenance: provider = "anthropic" | "openai"; model = exact model ID
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
     prompt_template_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # Subject of the reasoning

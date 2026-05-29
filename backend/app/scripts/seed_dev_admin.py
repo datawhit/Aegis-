@@ -5,6 +5,7 @@ Idempotent: re-running just updates the password to the env default.
 NEVER run this against a non-local environment. The check is enforced in
 code; do not weaken it.
 """
+
 from __future__ import annotations
 
 import asyncio

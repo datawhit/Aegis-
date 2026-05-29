@@ -1,4 +1,5 @@
 """PII redactor — assert real PII is replaced and the lookup is invertible."""
+
 from __future__ import annotations
 
 from app.core.redaction import PIIRedactor
@@ -6,9 +7,7 @@ from app.core.redaction import PIIRedactor
 
 def test_emails_are_redacted() -> None:
     r = PIIRedactor(salt="test")
-    out = r.redact(
-        {"normalized": {"affected_entities": {"users": ["alice@example.com"]}}}
-    )
+    out = r.redact({"normalized": {"affected_entities": {"users": ["alice@example.com"]}}})
     token = out.payload["normalized"]["affected_entities"]["users"][0]
     assert token.startswith("<user:")
     assert "alice" not in str(out.payload)

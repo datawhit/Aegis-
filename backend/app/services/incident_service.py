@@ -16,11 +16,13 @@ This is the spine of Sprint 1. The Celery triage task calls
 Everything happens in a single DB transaction — either the whole pipeline
 lands consistently, or nothing does.
 """
+
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +40,7 @@ from app.core.policy import (
 )
 from app.core.workflow import get_workflow_engine
 from app.logging import get_logger
-from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.alert import Alert, AlertStatus
 from app.models.incident import Incident, IncidentStatus
 from app.models.remediation_action import (
     RemediationAction,
@@ -93,9 +95,7 @@ class IncidentService:
         decision = await self._triage.triage(session, triage_request)
 
         # --- 2) Correlate or create incident --------------------------------
-        incident, is_new = await self._correlate_or_create(
-            session, alert=alert, decision=decision
-        )
+        incident, is_new = await self._correlate_or_create(session, alert=alert, decision=decision)
         # Backfill the reasoning snapshot's incident_id now that we have one.
         # We do this directly with the snapshot_id from the decision.
         await session.execute(
@@ -124,10 +124,7 @@ class IncidentService:
 
         # --- 3) Build proposed remediation (if AI suggested one) ------------
         proposed: RemediationAction | None = None
-        if (
-            decision.output.suggested_action_class
-            and not decision.ai_failed
-        ):
+        if decision.output.suggested_action_class and not decision.ai_failed:
             proposed = await self._propose_remediation(
                 session,
                 incident=incident,
@@ -244,9 +241,7 @@ class IncidentService:
         # Pull constraints from the winning policy. The DSL engine doesn't
         # surface them on PolicyDecision yet — we re-query by matched id.
         # Phase 2 keeps it simple; Phase 3 will pass constraints through.
-        requires_approval = await self._winning_policy_requires_approval(
-            session, decision
-        )
+        requires_approval = await self._winning_policy_requires_approval(session, decision)
 
         if decision.effect is PolicyEffect.ESCALATE:
             await get_approval_service().request(
@@ -289,20 +284,22 @@ class IncidentService:
         # Default-safe: if we can't determine, require approval.
         if not decision.matched_policy_ids:
             return True
-        from app.models.policy import Policy
         import uuid as _uuid
 
+        from app.models.policy import Policy
+
         policies = (
-            await session.execute(
-                select(Policy).where(
-                    Policy.id.in_([_uuid.UUID(pid) for pid in decision.matched_policy_ids])
+            (
+                await session.execute(
+                    select(Policy).where(
+                        Policy.id.in_([_uuid.UUID(pid) for pid in decision.matched_policy_ids])
+                    )
                 )
             )
-        ).scalars().all()
-        for p in policies:
-            if (p.constraints or {}).get("requires_approval", True):
-                return True
-        return False
+            .scalars()
+            .all()
+        )
+        return any((p.constraints or {}).get("requires_approval", True) for p in policies)
 
     async def _correlate_or_create(
         self,
@@ -421,9 +418,7 @@ def _params_and_blast_radius(
             return {"raw": entities}, 1
 
 
-def _default_rollback_plan(
-    action_class: RemediationActionClass, params: dict
-) -> dict | None:
+def _default_rollback_plan(action_class: RemediationActionClass, params: dict) -> dict | None:
     """Declare the inverse for every action class.
 
     By ADR-005, an action without a rollback plan cannot be ALLOW'd by the
@@ -448,7 +443,7 @@ def _default_rollback_plan(
     return {"action_class": inv, "parameters": params}
 
 
-def _set_reasoning_incident_id(snapshot_id: uuid.UUID, incident_id: uuid.UUID):
+def _set_reasoning_incident_id(snapshot_id: uuid.UUID, incident_id: uuid.UUID) -> Any:
     # Small helper used by `handle_new_alert` — keeps the SQL out of the
     # main flow for readability.
     from sqlalchemy import update

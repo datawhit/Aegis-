@@ -3,6 +3,7 @@
 An incident is the unit that the AI triage engine reasons about. Remediation
 actions, approvals, and audit history all hang off the incident.
 """
+
 from __future__ import annotations
 
 import enum
@@ -54,6 +55,4 @@ class Incident(Base, UUIDPKMixin, TimestampMixin):
     # we settle the schema.
     affected_entities: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
-    __table_args__ = (
-        Index("ix_incidents_status_severity", "status", "severity"),
-    )
+    __table_args__ = (Index("ix_incidents_status_severity", "status", "severity"),)

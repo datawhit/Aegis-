@@ -1,4 +1,5 @@
 """Ingest endpoint response schemas."""
+
 from __future__ import annotations
 
 import uuid

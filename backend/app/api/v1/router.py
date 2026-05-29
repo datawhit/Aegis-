@@ -1,12 +1,13 @@
 """API v1 router aggregation."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter
 
 from app.api.v1 import (
     approvals,
-    auth,
     audit,
+    auth,
     health,
     incidents,
     ingest,

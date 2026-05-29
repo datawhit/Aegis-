@@ -9,6 +9,7 @@ Authorization (Sprint 4):
   action is at best a compensating control; we want a senior actor on
   record. See `RemediationActionClass.is_reversible`.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -45,9 +46,7 @@ async def rollback_remediation(
         )
 
     action = (
-        await session.execute(
-            select(RemediationAction).where(RemediationAction.id == action_id)
-        )
+        await session.execute(select(RemediationAction).where(RemediationAction.id == action_id))
     ).scalar_one_or_none()
     if action is None:
         raise HTTPException(
@@ -80,13 +79,9 @@ async def rollback_remediation(
             reason=body.reason,
         )
     except RemediationNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except RemediationNotExecutableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     await session.commit()
     return {

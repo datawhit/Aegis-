@@ -4,6 +4,7 @@ Phase 2 ships Slack. Phase 3 adds Email + PagerDuty. The interface is
 deliberately small (`notify` + `request_approval`) so each channel can
 swap in without rewriting senders.
 """
+
 from app.core.notifications.base import (
     ApprovalNotification,
     Notification,

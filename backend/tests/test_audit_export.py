@@ -1,4 +1,5 @@
 """Test the signed audit export endpoint."""
+
 from __future__ import annotations
 
 import json
@@ -30,19 +31,23 @@ async def _make_user(db_session, role: UserRole, email: str) -> tuple[User, str]
     return user, token.access_token
 
 
-async def test_audit_export_unsigned_when_require_signature_false(
-    client, db_session
-) -> None:
+async def test_audit_export_unsigned_when_require_signature_false(client, db_session) -> None:
     _, access = await _make_user(db_session, UserRole.ADMIN, "admin@example.com")
 
     await get_audit_logger().record(
-        db_session, actor=Actor.system(label="test"),
-        action="audit.test1", resource_type="test", resource_id=None,
+        db_session,
+        actor=Actor.system(label="test"),
+        action="audit.test1",
+        resource_type="test",
+        resource_id=None,
         payload={"value": 1},
     )
     await get_audit_logger().record(
-        db_session, actor=Actor.system(label="test"),
-        action="audit.test2", resource_type="test", resource_id=None,
+        db_session,
+        actor=Actor.system(label="test"),
+        action="audit.test2",
+        resource_type="test",
+        resource_id=None,
         payload={"value": 2},
     )
     await db_session.commit()
@@ -65,9 +70,7 @@ async def test_audit_export_unsigned_when_require_signature_false(
     assert receipt["range"]["count"] == 2
     assert receipt["signature"] is None
     assert receipt["head_entry_hash"] == entries[-1]["entry_hash"]
-    assert receipt["content_hash"] == entries_digest(
-        [e["entry_hash"] for e in entries]
-    )
+    assert receipt["content_hash"] == entries_digest([e["entry_hash"] for e in entries])
 
 
 async def test_audit_export_requires_signature_503_when_no_key(client, db_session) -> None:
@@ -82,17 +85,18 @@ async def test_audit_export_requires_signature_503_when_no_key(client, db_sessio
     assert "signing key" in response.json()["detail"].lower()
 
 
-async def test_audit_export_signed_receipt_verifies(
-    client, db_session, monkeypatch
-) -> None:
+async def test_audit_export_signed_receipt_verifies(client, db_session, monkeypatch) -> None:
     priv_pem, pub_pem = generate_keypair_pem()
     monkeypatch.setattr(settings, "audit_export_signing_key", priv_pem)
     monkeypatch.setattr(settings, "audit_export_signing_key_id", "test-key-1")
 
     _, access = await _make_user(db_session, UserRole.ADMIN, "admin@example.com")
     await get_audit_logger().record(
-        db_session, actor=Actor.system(label="test"),
-        action="audit.signed.test", resource_type="test", resource_id=None,
+        db_session,
+        actor=Actor.system(label="test"),
+        action="audit.signed.test",
+        resource_type="test",
+        resource_id=None,
         payload={"hello": "world"},
     )
     await db_session.commit()

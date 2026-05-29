@@ -1,4 +1,5 @@
 """Notifier protocol + simple message types + stub impl for tests."""
+
 from __future__ import annotations
 
 import uuid
@@ -44,9 +45,7 @@ class StubNotifier(Notifier):
         self.notifications: list[Notification] = []
         self.approval_requests: list[ApprovalNotification] = []
 
-    async def notify(
-        self, *, title: str, body: str, severity: Severity = "info"
-    ) -> bool:
+    async def notify(self, *, title: str, body: str, severity: Severity = "info") -> bool:
         self.notifications.append(Notification(title=title, body=body, severity=severity))
         return True
 

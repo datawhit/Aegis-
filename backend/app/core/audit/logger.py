@@ -16,6 +16,7 @@ Design constraints:
   BY created_at DESC LIMIT 1 FOR UPDATE` on the tip, scoped to a short
   transaction.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -81,22 +82,13 @@ class HashChainAuditLogger(AuditLogger):
         payload: dict[str, Any],
         reasoning_snapshot_id: uuid.UUID | None = None,
     ) -> AuditLog:
-        # Lock the current tip for the duration of this txn so we cannot
-        # compute a hash against a row that gets superseded mid-write.
-        result = await session.execute(
-            select(AuditLog)
-            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-            .limit(1)
-            .with_for_update()
-        )
-        tip = result.scalar_one_or_none()
-        prev_hash = tip.entry_hash if tip is not None else None
-
         # The DB sets created_at via server_default; we don't have it on the
         # row until flush. Compute the hash over (prev_hash, actor, action,
         # resource_type, resource_id, payload, reasoning_snapshot_id) — i.e.
         # everything except the timestamp. Verification re-derives the same
-        # canonical payload from these stored fields.
+        # canonical payload from these stored fields. The inner _write() takes
+        # the tip lock for the duration of the txn so a concurrent writer
+        # cannot supersede our prev_hash between read and insert.
         async def _write(audit_session: AsyncSession) -> AuditLog:
             result = await audit_session.execute(
                 select(AuditLog)
@@ -117,7 +109,7 @@ class HashChainAuditLogger(AuditLogger):
                 payload=payload,
                 reasoning_snapshot_id=reasoning_snapshot_id,
                 prev_hash=prev_hash,
-                entry_hash="pending",   # replaced below
+                entry_hash="pending",  # replaced below
             )
             entry.entry_hash = _compute_entry_hash(
                 prev_hash=prev_hash,

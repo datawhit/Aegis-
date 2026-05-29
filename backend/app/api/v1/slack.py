@@ -9,6 +9,7 @@ The user identity carried on the Slack callback is **the Slack user**,
 not an Aegis user — we map Slack identity to Aegis user via email match
 (Phase 2 trade-off; full SSO mapping ships with Okta in Phase 3).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +17,7 @@ import hmac
 import json
 import time
 import urllib.parse
+import uuid
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
@@ -29,7 +31,6 @@ from app.services.approval_service import (
     ApprovalNotPendingError,
     get_approval_service,
 )
-import uuid
 
 log = get_logger("api.slack")
 router = APIRouter()
@@ -67,14 +68,10 @@ async def slack_interact(request: Request, session: SessionDep) -> dict:
 
     slack_user_email = (payload.get("user") or {}).get("email") or ""
     actor = (
-        await session.execute(
-            select(User).where(User.email == slack_user_email.lower())
-        )
+        await session.execute(select(User).where(User.email == slack_user_email.lower()))
     ).scalar_one_or_none()
     if actor is None:
-        log.warning(
-            "slack.interact.unknown_user", slack_email=slack_user_email
-        )
+        log.warning("slack.interact.unknown_user", slack_email=slack_user_email)
         return {
             "response_type": "ephemeral",
             "text": (
@@ -118,9 +115,12 @@ def _verify_slack_signature(request: Request, raw_body: bytes) -> bool:
     if abs(int(time.time()) - ts_int) > 60 * 5:
         return False
     basestring = f"v0:{ts}:".encode() + raw_body
-    expected = "v0=" + hmac.new(
-        settings.slack_signing_secret.encode("utf-8"),
-        basestring,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "v0="
+        + hmac.new(
+            settings.slack_signing_secret.encode("utf-8"),
+            basestring,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return hmac.compare_digest(expected, sig)

@@ -10,6 +10,7 @@ Trade-off: the LLM may classify slightly less accurately without raw
 identifiers. The cost of *exposing* those identifiers — especially for
 self-hosted enterprise customers under GDPR/SOC2 — is much higher.
 """
+
 from app.core.redaction.pii import (
     PIIRedactor,
     RedactionResult,

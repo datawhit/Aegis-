@@ -5,6 +5,7 @@ console renderer locally. Field names match OpenTelemetry semantic
 conventions where reasonable so that swapping in an OTel collector later is
 mechanical (`trace_id`, `span_id`, `service.name`, etc.).
 """
+
 from __future__ import annotations
 
 import logging

@@ -3,6 +3,7 @@
 Even though the stub never returns ALLOW yet, these tests pin the invariants
 the real engine MUST honor when it lands in Sprint 2.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock

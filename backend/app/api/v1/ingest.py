@@ -14,6 +14,7 @@ We do NOT run AI triage inline. The endpoint returns as fast as it can —
 webhooks expect snappy 200s. The actual work happens in a Celery task
 submitted via the `WorkflowEngine` interface.
 """
+
 from __future__ import annotations
 
 import json

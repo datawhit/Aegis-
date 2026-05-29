@@ -13,6 +13,7 @@ Design notes:
   Temporal migration mechanical: Temporal natively models compensations,
   so the rollback dispatch collapses into the workflow definition itself.
 """
+
 from __future__ import annotations
 
 import uuid

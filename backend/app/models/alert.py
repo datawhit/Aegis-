@@ -1,11 +1,13 @@
 """Alert model — normalized signal ingested from a source system."""
+
 from __future__ import annotations
 
 import enum
 import uuid
 
 from sqlalchemy import Enum, ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPKMixin
@@ -22,7 +24,7 @@ class AlertSeverity(str, enum.Enum):
 class AlertStatus(str, enum.Enum):
     NEW = "new"
     TRIAGED = "triaged"
-    LINKED = "linked"          # rolled into an incident
+    LINKED = "linked"  # rolled into an incident
     SUPPRESSED = "suppressed"
     DUPLICATE = "duplicate"
 
@@ -30,8 +32,8 @@ class AlertStatus(str, enum.Enum):
 class Alert(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "alerts"
 
-    # Origin
-    source: Mapped[str] = mapped_column(String(64), nullable=False)             # e.g. "defender", "okta"
+    # Origin (source = "defender" | "okta" | etc.)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
     source_event_id: Mapped[str] = mapped_column(String(256), nullable=False)
     correlation_key: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
 

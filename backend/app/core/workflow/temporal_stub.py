@@ -2,6 +2,7 @@
 
 Implementation arrives when any of the ADR-002 migration triggers are met.
 """
+
 from __future__ import annotations
 
 import uuid

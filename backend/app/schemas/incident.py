@@ -1,4 +1,5 @@
 """Incident schemas (list + detail)."""
+
 from __future__ import annotations
 
 import uuid

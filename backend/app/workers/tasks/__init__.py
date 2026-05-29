@@ -4,6 +4,7 @@ Import each task module here so Celery's autodiscovery picks them up when
 the worker boots. The names must match `workflows.<workflow_name>` —
 see CeleryWorkflowEngine for the dispatch contract.
 """
-from app.workers.tasks import audit_verifier, remediation, triage  # noqa: F401
+
+from app.workers.tasks import audit_verifier, remediation, triage
 
 __all__ = ["triage", "remediation", "audit_verifier"]

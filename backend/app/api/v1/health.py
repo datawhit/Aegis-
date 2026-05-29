@@ -4,6 +4,7 @@ Two flavors:
 - `/health` — liveness. Always returns 200 if the process is up.
 - `/ready`  — readiness. Verifies dependencies (DB ping). 503 on failure.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, status

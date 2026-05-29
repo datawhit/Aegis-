@@ -8,6 +8,7 @@ Naming convention: every workflow registers under `workflows.<name>` so
 `CeleryWorkflowEngine.submit()` can dispatch by name without a separate
 registry.
 """
+
 from __future__ import annotations
 
 from celery import Celery

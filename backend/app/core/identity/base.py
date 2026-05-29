@@ -4,6 +4,7 @@ Every authentication flow in Aegis routes through this interface. The audit
 log's `actor_id` is populated from `TokenClaims.user_id` — so any provider
 must produce stable, comparable user IDs.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -20,7 +21,7 @@ from app.models.user import User
 class Credentials:
     """Authentication input. Discriminated by `kind`."""
 
-    kind: str       # "password" | "oidc_code" | "service_token"
+    kind: str  # "password" | "oidc_code" | "service_token"
     email: str | None = None
     password: str | None = None
     code: str | None = None
@@ -53,9 +54,7 @@ class IdentityProvider(Protocol):
     callers. Local impls can `return await` over sync work.
     """
 
-    async def authenticate(
-        self, session: AsyncSession, credentials: Credentials
-    ) -> User | None:
+    async def authenticate(self, session: AsyncSession, credentials: Credentials) -> User | None:
         """Verify credentials and return the corresponding User, or None.
 
         Must NOT throw on wrong-password — return None so callers can render

@@ -12,6 +12,7 @@ Lifecycle:
   4. Carry through `constraints` from the winning policy so the caller
      (IncidentService) can read e.g. `requires_approval`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,7 +32,8 @@ from app.core.policy.engine import (
     PolicyEvalRequest,
 )
 from app.logging import get_logger
-from app.models.policy import Policy, PolicyEffect as ORMPolicyEffect
+from app.models.policy import Policy
+from app.models.policy import PolicyEffect as ORMPolicyEffect
 
 log = get_logger("policy.json")
 
@@ -46,9 +48,7 @@ class _Match:
 
 
 class JSONPolicyEngine(PolicyEngine):
-    async def evaluate(
-        self, session: AsyncSession, request: PolicyEvalRequest
-    ) -> PolicyDecision:
+    async def evaluate(self, session: AsyncSession, request: PolicyEvalRequest) -> PolicyDecision:
         # --- hard invariants (ADR-005) -------------------------------------
         if not request.has_rollback_plan:
             return PolicyDecision(
@@ -73,12 +73,16 @@ class JSONPolicyEngine(PolicyEngine):
 
         try:
             policies = (
-                await session.execute(
-                    select(Policy)
-                    .where(Policy.is_active.is_(True))
-                    .order_by(Policy.priority.desc(), Policy.name.asc())
+                (
+                    await session.execute(
+                        select(Policy)
+                        .where(Policy.is_active.is_(True))
+                        .order_by(Policy.priority.desc(), Policy.name.asc())
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         except Exception as exc:  # pragma: no cover — defensive
             log.exception("policy.load_failed", error=str(exc))
             return PolicyDecision(

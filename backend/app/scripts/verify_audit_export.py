@@ -14,6 +14,7 @@ Exit codes:
 This script has zero dependencies on Aegis runtime state (DB, FastAPI).
 It speaks only to the exported file + a public key.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -93,17 +94,13 @@ def main() -> None:
 
     expected_count = receipt["range"]["count"]
     if expected_count != len(entries):
-        _fail(
-            f"entry count mismatch: receipt claims {expected_count}, file has {len(entries)}"
-        )
+        _fail(f"entry count mismatch: receipt claims {expected_count}, file has {len(entries)}")
 
     if entries:
         head_entry_hash = entries[-1]["entry_hash"]
         if head_entry_hash != receipt["head_entry_hash"]:
             receipt_head = receipt["head_entry_hash"]
-            _fail(
-                f"head_entry_hash mismatch: file={head_entry_hash} receipt={receipt_head}"
-            )
+            _fail(f"head_entry_hash mismatch: file={head_entry_hash} receipt={receipt_head}")
 
     computed_content = entries_digest([e["entry_hash"] for e in entries])
     if computed_content != receipt["content_hash"]:

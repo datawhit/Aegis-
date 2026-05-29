@@ -1,4 +1,5 @@
 """RemediationAction model — proposed and/or executed response actions."""
+
 from __future__ import annotations
 
 import enum
@@ -16,7 +17,7 @@ class RemediationActionClass(str, enum.Enum):
     # Identity
     REVOKE_USER_SESSIONS = "revoke_user_sessions"
     DISABLE_USER = "disable_user"
-    FORCE_PASSWORD_RESET = "force_password_reset"
+    FORCE_PASSWORD_RESET = "force_password_reset"  # noqa: S105 - enum value, not a credential
     # Endpoint
     ISOLATE_HOST = "isolate_host"
     QUARANTINE_FILE = "quarantine_file"
@@ -40,16 +41,18 @@ class RemediationActionClass(str, enum.Enum):
         return self not in _NON_REVERSIBLE_ACTIONS
 
 
-_NON_REVERSIBLE_ACTIONS: frozenset[RemediationActionClass] = frozenset({
-    RemediationActionClass.REVOKE_USER_SESSIONS,
-    RemediationActionClass.FORCE_PASSWORD_RESET,
-    RemediationActionClass.NOTIFY_SLACK,
-    RemediationActionClass.CUSTOM,  # unknown blast radius — fail closed
-})
+_NON_REVERSIBLE_ACTIONS: frozenset[RemediationActionClass] = frozenset(
+    {
+        RemediationActionClass.REVOKE_USER_SESSIONS,
+        RemediationActionClass.FORCE_PASSWORD_RESET,
+        RemediationActionClass.NOTIFY_SLACK,
+        RemediationActionClass.CUSTOM,  # unknown blast radius — fail closed
+    }
+)
 
 
 class RemediationStatus(str, enum.Enum):
-    PROPOSED = "proposed"            # selected by AI, awaiting policy eval
+    PROPOSED = "proposed"  # selected by AI, awaiting policy eval
     POLICY_ALLOWED = "policy_allowed"
     POLICY_ESCALATED = "policy_escalated"
     POLICY_DENIED = "policy_denied"
@@ -107,9 +110,7 @@ class RemediationAction(Base, UUIDPKMixin, TimestampMixin):
     ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Idempotency key so retries don't double-execute against integrations.
-    idempotency_key: Mapped[str] = mapped_column(
-        String(128), unique=True, nullable=False
-    )
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
 
     # Linkage to the workflow run that executed (or is executing) this action.
     workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(

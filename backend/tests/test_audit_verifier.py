@@ -1,4 +1,5 @@
 """HashChainVerifier — happy-path + tampering detection."""
+
 from __future__ import annotations
 
 import uuid
@@ -8,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import Actor, get_audit_logger, get_audit_verifier
 from app.models.alert import Alert, AlertSeverity, AlertStatus
-from app.models.audit_log import AuditLog
 
 
 @pytest.fixture
@@ -26,9 +26,7 @@ async def some_alert(db_session: AsyncSession) -> Alert:
     return alert
 
 
-async def test_verifier_passes_on_clean_chain(
-    db_session: AsyncSession, some_alert: Alert
-) -> None:
+async def test_verifier_passes_on_clean_chain(db_session: AsyncSession, some_alert: Alert) -> None:
     logger = get_audit_logger()
     for action in ["test.created", "test.updated", "test.archived"]:
         await logger.record(
@@ -71,9 +69,7 @@ async def test_verifier_detects_payload_tampering(
     assert entry.id in report.hash_mismatches
 
 
-async def test_verifier_detects_link_break(
-    db_session: AsyncSession, some_alert: Alert
-) -> None:
+async def test_verifier_detects_link_break(db_session: AsyncSession, some_alert: Alert) -> None:
     logger = get_audit_logger()
     a = await logger.record(
         db_session,

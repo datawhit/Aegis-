@@ -1,4 +1,5 @@
 """GET /incidents, GET /incidents/{id} — incident list + detail."""
+
 from __future__ import annotations
 
 import uuid
@@ -38,15 +39,17 @@ async def list_incidents(
     if severity:
         base = base.where(Incident.severity == severity)
 
-    total = (
-        await session.execute(select(func.count()).select_from(base.subquery()))
-    ).scalar_one()
+    total = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
 
     items = (
-        await session.execute(
-            base.order_by(Incident.created_at.desc()).limit(limit).offset(offset)
+        (
+            await session.execute(
+                base.order_by(Incident.created_at.desc()).limit(limit).offset(offset)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return IncidentList(
         items=[IncidentSummary.model_validate(i) for i in items],
@@ -64,39 +67,55 @@ async def get_incident(
 ) -> IncidentDetail:
     incident = await session.get(Incident, incident_id)
     if incident is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="incident not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="incident not found")
 
     alerts = (
-        await session.execute(
-            select(Alert)
-            .where(Alert.incident_id == incident_id)
-            .order_by(Alert.created_at.asc())
+        (
+            await session.execute(
+                select(Alert)
+                .where(Alert.incident_id == incident_id)
+                .order_by(Alert.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     remediations = (
-        await session.execute(
-            select(RemediationAction)
-            .where(RemediationAction.incident_id == incident_id)
-            .order_by(RemediationAction.created_at.asc())
+        (
+            await session.execute(
+                select(RemediationAction)
+                .where(RemediationAction.incident_id == incident_id)
+                .order_by(RemediationAction.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     reasonings = (
-        await session.execute(
-            select(AIReasoningSnapshot)
-            .where(AIReasoningSnapshot.incident_id == incident_id)
-            .order_by(AIReasoningSnapshot.created_at.asc())
+        (
+            await session.execute(
+                select(AIReasoningSnapshot)
+                .where(AIReasoningSnapshot.incident_id == incident_id)
+                .order_by(AIReasoningSnapshot.created_at.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return IncidentDetail(
         id=incident.id,
         title=incident.title,
-        severity=incident.severity.value if hasattr(incident.severity, "value") else str(incident.severity),
-        status=incident.status.value if hasattr(incident.status, "value") else str(incident.status),
+        severity=(
+            incident.severity.value
+            if hasattr(incident.severity, "value")
+            else str(incident.severity)
+        ),
+        status=(
+            incident.status.value if hasattr(incident.status, "value") else str(incident.status)
+        ),
         ai_confidence=incident.ai_confidence,
         mitre_techniques=incident.mitre_techniques,
         created_at=incident.created_at,
@@ -107,5 +126,3 @@ async def get_incident(
         remediation_actions=[RemediationActionRead.model_validate(r) for r in remediations],
         reasoning_snapshots=[AIReasoningRead.model_validate(s) for s in reasonings],
     )
-
-

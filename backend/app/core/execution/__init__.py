@@ -11,6 +11,7 @@ Real outbound calls require `AEGIS_MS_GRAPH_LIVE=true`. Default is
 **dry-run** — the connector logs what it WOULD do and returns a
 successful result, so the demo loop works without real Azure credentials.
 """
+
 from app.core.execution.base import (
     ExecutionConnector,
     ExecutionRegistry,

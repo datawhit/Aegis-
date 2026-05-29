@@ -4,6 +4,7 @@ Phase 1 ships Claude-only (ADR-007). The stub raises explicitly so a misconfig
 (`AEGIS_DEFAULT_AI_PROVIDER=openai`) fails fast rather than silently dropping
 alerts on the floor.
 """
+
 from __future__ import annotations
 
 from app.core.ai.base import AIProvider, TriageRequest, TriageResult

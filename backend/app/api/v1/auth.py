@@ -1,4 +1,5 @@
 """Authentication endpoints."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
@@ -46,8 +47,11 @@ async def login(
         action="auth.login_succeeded",
         resource_type="user",
         resource_id=user.id,
-        payload={"auth_provider": user.auth_provider.value
-                 if hasattr(user.auth_provider, "value") else str(user.auth_provider)},
+        payload={
+            "auth_provider": user.auth_provider.value
+            if hasattr(user.auth_provider, "value")
+            else str(user.auth_provider)
+        },
     )
     await session.commit()
     return TokenResponse(

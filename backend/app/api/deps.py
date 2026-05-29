@@ -1,4 +1,5 @@
 """Shared FastAPI dependencies (DB session, current user)."""
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -69,15 +70,11 @@ async def require_admin(current_user: CurrentUserDep) -> User:
 
 
 async def require_admin_or_operator(current_user: CurrentUserDep) -> User:
-    return _enforce_roles(
-        current_user, {UserRole.ADMIN.value, UserRole.OPERATOR.value}
-    )
+    return _enforce_roles(current_user, {UserRole.ADMIN.value, UserRole.OPERATOR.value})
 
 
 async def require_admin_or_reviewer(current_user: CurrentUserDep) -> User:
-    return _enforce_roles(
-        current_user, {UserRole.ADMIN.value, UserRole.REVIEWER.value}
-    )
+    return _enforce_roles(current_user, {UserRole.ADMIN.value, UserRole.REVIEWER.value})
 
 
 AdminDep = Annotated[User, Depends(require_admin)]

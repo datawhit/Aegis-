@@ -22,6 +22,7 @@ Dry-run posture (Q13):
 References:
   https://learn.microsoft.com/en-us/graph/api/user-revokesigninsessions
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -36,7 +37,7 @@ from app.logging import get_logger
 log = get_logger("execution.ms_graph")
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-_LOGIN_TOKEN_URL = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+_LOGIN_TOKEN_URL = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"  # noqa: S105 - URL constant, not a credential
 
 _SUPPORTED = {"revoke_user_sessions"}
 _ROLLBACK_SUPPORTED: set[str] = set()
@@ -63,9 +64,7 @@ class MicrosoftGraphConnector(ExecutionConnector):
         idempotency_key: str,
     ) -> ExecutionResult:
         if action_class != "revoke_user_sessions":
-            return ExecutionResult(
-                ok=False, error=f"unsupported action_class: {action_class}"
-            )
+            return ExecutionResult(ok=False, error=f"unsupported action_class: {action_class}")
 
         users: list[str] = parameters.get("users") or []
         if not users:
@@ -144,9 +143,12 @@ class MicrosoftGraphConnector(ExecutionConnector):
     # ---- internals ----------------------------------------------------------
     async def _access_token(self) -> str:
         now = datetime.now(UTC)
-        if self._cached_token and self._cached_token_expires_at:
-            if now < self._cached_token_expires_at - timedelta(seconds=30):
-                return self._cached_token
+        if (
+            self._cached_token
+            and self._cached_token_expires_at
+            and now < self._cached_token_expires_at - timedelta(seconds=30)
+        ):
+            return self._cached_token
 
         if not (
             settings.ms_graph_tenant_id

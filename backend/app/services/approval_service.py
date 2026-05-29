@@ -10,6 +10,7 @@ Transitions out of PENDING audit-log the actor and the decision note.
 A pending approval past `expires_at` is moved to EXPIRED by the Celery
 beat task `workflows.expire_stale_approvals`.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -131,9 +132,7 @@ class ApprovalService:
         note: str | None = None,
     ) -> ApprovalDecision:
         approval = (
-            await session.execute(
-                select(Approval).where(Approval.id == approval_id)
-            )
+            await session.execute(select(Approval).where(Approval.id == approval_id))
         ).scalar_one_or_none()
         if approval is None:
             raise ApprovalNotFoundError(str(approval_id))
@@ -151,9 +150,7 @@ class ApprovalService:
         ).scalar_one()
 
         if actor.role != UserRole.ADMIN and actor.role.value != approval.requested_role:
-            raise ApprovalUnauthorizedError(
-                "user role is not permitted to decide this approval"
-            )
+            raise ApprovalUnauthorizedError("user role is not permitted to decide this approval")
 
         approval.state = ApprovalState.APPROVED if approve else ApprovalState.REJECTED
         approval.decided_by_user_id = actor.id
@@ -197,13 +194,17 @@ class ApprovalService:
         """Move PENDING approvals past expires_at to EXPIRED. Returns count."""
         now = datetime.now(UTC)
         stale = (
-            await session.execute(
-                select(Approval).where(
-                    Approval.state == ApprovalState.PENDING,
-                    Approval.expires_at < now,
+            (
+                await session.execute(
+                    select(Approval).where(
+                        Approval.state == ApprovalState.PENDING,
+                        Approval.expires_at < now,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for approval in stale:
             approval.state = ApprovalState.EXPIRED

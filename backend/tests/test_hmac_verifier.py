@@ -1,4 +1,5 @@
 """HMAC verifier — happy path + failure modes."""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +18,7 @@ BODY = b'{"alertId":"x"}'
 
 
 def _sign(body: bytes, ts: int, secret: str = SECRET) -> str:
-    message = f"{ts}.".encode("utf-8") + body
+    message = f"{ts}.".encode() + body
     return "sha256=" + hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 

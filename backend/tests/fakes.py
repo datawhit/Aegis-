@@ -1,4 +1,5 @@
 """Test fakes — kept here so multiple test modules share one definition."""
+
 from __future__ import annotations
 
 from app.core.ai.base import (

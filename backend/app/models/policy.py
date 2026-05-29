@@ -1,4 +1,5 @@
 """Policy model — governance rules evaluated by the PolicyEngine."""
+
 from __future__ import annotations
 
 import enum

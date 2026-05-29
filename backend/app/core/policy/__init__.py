@@ -8,6 +8,7 @@ invariants.
 The selector picks based on settings; tests can construct the engine
 directly with `JSONPolicyEngine()`.
 """
+
 from app.config import settings
 from app.core.policy.dsl import (
     PolicyDSLError,

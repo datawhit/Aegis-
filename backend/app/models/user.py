@@ -4,6 +4,7 @@ After Okta/SSO lands (Sprint 3+), this table continues to back service
 accounts and break-glass admins. SSO users are mirrored here on first login
 with `auth_provider = 'okta'`.
 """
+
 from __future__ import annotations
 
 import enum
@@ -16,10 +17,10 @@ from app.models.base import Base, TimestampMixin, UUIDPKMixin
 
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
-    OPERATOR = "operator"   # can approve / act
-    REVIEWER = "reviewer"   # compliance / audit read-only (incl. signed export)
-    VIEWER = "viewer"       # read-only
-    SERVICE = "service"     # programmatic actor (e.g. ingestion connector)
+    OPERATOR = "operator"  # can approve / act
+    REVIEWER = "reviewer"  # compliance / audit read-only (incl. signed export)
+    VIEWER = "viewer"  # read-only
+    SERVICE = "service"  # programmatic actor (e.g. ingestion connector)
 
 
 class AuthProvider(str, enum.Enum):

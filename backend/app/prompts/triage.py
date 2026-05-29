@@ -5,6 +5,7 @@ note in DECISIONS.md. The `prompt_template_id` field on the reasoning
 snapshot records the version against every decision so we can replay/audit
 historical choices.
 """
+
 from __future__ import annotations
 
 import json
@@ -94,7 +95,12 @@ TRIAGE_TOOL_SCHEMA = {
 }
 
 
-def render_user_prompt(*, source: str, normalized: dict[str, Any], raw_excerpt: dict[str, Any]) -> str:
+def render_user_prompt(
+    *,
+    source: str,
+    normalized: dict[str, Any],
+    raw_excerpt: dict[str, Any],
+) -> str:
     """The user-turn payload sent to the model.
 
     Kept as a function (not a format-string) so we can normalize / redact /

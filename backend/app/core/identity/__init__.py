@@ -4,6 +4,7 @@
 rather than instantiating providers directly. The concrete impl is chosen
 by `AEGIS_IDENTITY_PROVIDER`.
 """
+
 from app.config import settings
 from app.core.identity.base import (
     Credentials,

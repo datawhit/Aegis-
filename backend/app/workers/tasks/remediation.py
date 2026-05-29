@@ -1,11 +1,11 @@
 """Celery tasks for remediation execution + rollback + approval expiry."""
+
 from __future__ import annotations
 
 import asyncio
 import uuid
 from datetime import UTC, datetime
-
-from sqlalchemy import select
+from typing import Any
 
 from app.core.audit import Actor, get_audit_logger
 from app.db import session_scope
@@ -86,9 +86,7 @@ async def _execute(workflow_run_id: uuid.UUID) -> dict:
         run = await session.get(WorkflowRun, workflow_run_id)
         if run is not None:
             run.status = (
-                WorkflowStatus.COMPLETED
-                if outcome.execution_result.ok
-                else WorkflowStatus.FAILED
+                WorkflowStatus.COMPLETED if outcome.execution_result.ok else WorkflowStatus.FAILED
             )
             run.completed_at = datetime.now(UTC)
             run.result = {
@@ -97,13 +95,14 @@ async def _execute(workflow_run_id: uuid.UUID) -> dict:
                 "ok": outcome.execution_result.ok,
                 "dry_run": outcome.execution_result.dry_run,
             }
+        payload: dict[str, Any] = dict(run.result) if run is not None and run.result else {}
         await get_audit_logger().record(
             session,
             actor=Actor.system(label="workers.remediation"),
             action="workflow.execute_completed",
             resource_type="workflow_run",
             resource_id=workflow_run_id,
-            payload=run.result if run is not None else {},
+            payload=payload,
         )
 
     log.info(

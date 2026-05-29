@@ -18,6 +18,7 @@ This is *redaction*, not *encryption*. The token is derived from a SHA-256
 of `(salt || value)` — recovering the original from the token requires the
 lookup table.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -59,7 +60,7 @@ class PIIRedactor:
 
     def redact(self, payload: dict[str, Any]) -> RedactionResult:
         lookup: dict[str, str] = {}
-        reverse: dict[str, str] = {}     # original → token (for dedupe)
+        reverse: dict[str, str] = {}  # original → token (for dedupe)
         redacted = self._walk(payload, lookup, reverse)
         return RedactionResult(payload=redacted, lookup=lookup)
 
@@ -83,9 +84,7 @@ class PIIRedactor:
         s = _IPV4_RE.sub(lambda m: self._tok("ip", m.group(0), lookup, reverse), s)
         # Hostnames last — the regex is loose, so it will match things like
         # "example.com" but not standalone words.
-        s = _HOSTNAME_RE.sub(
-            lambda m: self._tok("host", m.group(0), lookup, reverse), s
-        )
+        s = _HOSTNAME_RE.sub(lambda m: self._tok("host", m.group(0), lookup, reverse), s)
         return s
 
     def _tok(self, kind: str, value: str, lookup: dict, reverse: dict) -> str:

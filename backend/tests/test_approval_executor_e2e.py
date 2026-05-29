@@ -11,6 +11,7 @@ We bypass the policy engine here (set up the action in POLICY_ESCALATED
 state directly) — policy is tested separately. This test focuses on the
 state machine + executor wiring.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -20,7 +21,6 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit import Actor, get_audit_logger
 from app.core.execution import ExecutionRegistry
 from app.core.execution.stub import StubExecutionConnector
 from app.core.notifications.base import StubNotifier
@@ -157,12 +157,14 @@ async def test_full_closed_loop(
     # Approvals are audited against approval.id; remediations against
     # remediation_action.id. Check the union of both resource scopes.
     actions_seen = (
-        await db_session.execute(
-            select(AuditLog.action).where(
-                AuditLog.resource_id.in_([action.id, approval.id])
+        (
+            await db_session.execute(
+                select(AuditLog.action).where(AuditLog.resource_id.in_([action.id, approval.id]))
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     expected = {
         "approval.requested",
         "approval.approved",

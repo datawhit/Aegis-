@@ -4,6 +4,7 @@ All env access lives here. Modules elsewhere import `settings`; nothing else
 should read `os.environ` directly. This keeps the surface for misconfiguration
 small and gives us one place to add validation, secret loading, or Vault.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -28,17 +29,13 @@ class Settings(BaseSettings):
     log_format: Literal["json", "console"] = "json"
 
     # --- API ---
-    api_host: str = "0.0.0.0"
+    api_host: str = "0.0.0.0"  # noqa: S104 - intentional bind-all for container deployment
     api_port: int = 8000
     cors_origins: str = "http://localhost:5173"
 
     # --- DB ---
-    database_url: str = Field(
-        default="postgresql+asyncpg://aegis:aegis@postgres:5432/aegis"
-    )
-    database_url_sync: str = Field(
-        default="postgresql+psycopg://aegis:aegis@postgres:5432/aegis"
-    )
+    database_url: str = Field(default="postgresql+asyncpg://aegis:aegis@postgres:5432/aegis")
+    database_url_sync: str = Field(default="postgresql+psycopg://aegis:aegis@postgres:5432/aegis")
 
     # --- Redis / Celery ---
     redis_url: str = "redis://redis:6379/0"

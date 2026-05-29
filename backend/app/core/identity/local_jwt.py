@@ -1,4 +1,5 @@
 """Local JWT identity provider — HS256, users table, bcrypt passwords."""
+
 from __future__ import annotations
 
 import uuid
@@ -31,17 +32,13 @@ def verify_password(plaintext: str, hashed: str) -> bool:
 
 
 class LocalJWTIdentityProvider(IdentityProvider):
-    async def authenticate(
-        self, session: AsyncSession, credentials: Credentials
-    ) -> User | None:
+    async def authenticate(self, session: AsyncSession, credentials: Credentials) -> User | None:
         if credentials.kind != "password":
             return None
         if not credentials.email or not credentials.password:
             return None
 
-        result = await session.execute(
-            select(User).where(User.email == credentials.email.lower())
-        )
+        result = await session.execute(select(User).where(User.email == credentials.email.lower()))
         user = result.scalar_one_or_none()
         if user is None or not user.is_active or not user.hashed_password:
             return None
@@ -82,9 +79,7 @@ class LocalJWTIdentityProvider(IdentityProvider):
 
     async def verify_token(self, token: str) -> TokenClaims:
         try:
-            payload = jwt.decode(
-                token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
-            )
+            payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         except JWTError as exc:
             raise InvalidTokenError("invalid or expired token") from exc
 

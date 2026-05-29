@@ -3,6 +3,7 @@
 Reversible action classes: operator OR admin may roll back.
 Non-reversible action classes: admin only.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -107,13 +108,9 @@ async def test_operator_can_rollback_reversible_action(client, db_session) -> No
     assert body["new_status"] == RemediationStatus.ROLLED_BACK.value
 
 
-async def test_operator_cannot_rollback_non_reversible_action(
-    client, db_session
-) -> None:
+async def test_operator_cannot_rollback_non_reversible_action(client, db_session) -> None:
     _, access = await _make_user(db_session, UserRole.OPERATOR)
-    action = await _make_executed_action(
-        db_session, RemediationActionClass.REVOKE_USER_SESSIONS
-    )
+    action = await _make_executed_action(db_session, RemediationActionClass.REVOKE_USER_SESSIONS)
     await db_session.commit()
 
     response = await client.post(
@@ -127,9 +124,7 @@ async def test_operator_cannot_rollback_non_reversible_action(
 
 async def test_admin_can_rollback_non_reversible_action(client, db_session) -> None:
     _, access = await _make_user(db_session, UserRole.ADMIN)
-    action = await _make_executed_action(
-        db_session, RemediationActionClass.REVOKE_USER_SESSIONS
-    )
+    action = await _make_executed_action(db_session, RemediationActionClass.REVOKE_USER_SESSIONS)
     await db_session.commit()
 
     response = await client.post(

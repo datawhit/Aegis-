@@ -1,4 +1,5 @@
 """Scheduled audit-chain verifier — Celery beat task."""
+
 from __future__ import annotations
 
 import asyncio

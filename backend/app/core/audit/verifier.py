@@ -14,6 +14,7 @@ Verification algorithm:
 The walk is O(N) and reads only — no locks beyond the read snapshot. Safe
 to run alongside live ingest.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -48,9 +49,7 @@ class HashChainVerifier:
         from datetime import UTC
 
         started = datetime.now(UTC)
-        report = VerifierReport(
-            started_at=started, completed_at=started, rows_checked=0
-        )
+        report = VerifierReport(started_at=started, completed_at=started, rows_checked=0)
 
         # Cursor-style scan would be friendlier for huge chains; Phase 2
         # uses a straight ORDER BY since expected volume (<10M rows) fits
@@ -62,13 +61,17 @@ class HashChainVerifier:
 
         while True:
             rows = (
-                await session.execute(
-                    select(AuditLog)
-                    .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
-                    .limit(batch_size)
-                    .offset(offset)
+                (
+                    await session.execute(
+                        select(AuditLog)
+                        .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+                        .limit(batch_size)
+                        .offset(offset)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not rows:
                 break
 
@@ -114,9 +117,7 @@ class HashChainVerifier:
             "rows_checked": report.rows_checked,
             "hash_mismatches": [str(i) for i in report.hash_mismatches],
             "link_breaks": [str(i) for i in report.link_breaks],
-            "duration_ms": int(
-                (report.completed_at - report.started_at).total_seconds() * 1000
-            ),
+            "duration_ms": int((report.completed_at - report.started_at).total_seconds() * 1000),
             "ok": report.ok,
         }
         if report.ok:

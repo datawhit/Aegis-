@@ -11,6 +11,7 @@ Dry-run posture:
 The interactive button's `value` carries the approval_id; the receiving
 endpoint maps that back to the Approval row and runs the state machine.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,9 +33,7 @@ _SEVERITY_TO_COLOR = {
 
 
 class SlackNotifier(Notifier):
-    async def notify(
-        self, *, title: str, body: str, severity: Severity = "info"
-    ) -> bool:
+    async def notify(self, *, title: str, body: str, severity: Severity = "info") -> bool:
         payload = {
             "attachments": [
                 {
@@ -56,9 +55,7 @@ class SlackNotifier(Notifier):
 
     async def request_approval(self, approval: ApprovalNotification) -> bool:
         confidence_str = (
-            "—"
-            if approval.ai_confidence is None
-            else f"{int(approval.ai_confidence * 100)}%"
+            "—" if approval.ai_confidence is None else f"{int(approval.ai_confidence * 100)}%"
         )
         payload = {
             "attachments": [
@@ -75,10 +72,22 @@ class SlackNotifier(Notifier):
                         {
                             "type": "section",
                             "fields": [
-                                {"type": "mrkdwn", "text": f"*Blast radius:* {approval.blast_radius}"},
-                                {"type": "mrkdwn", "text": f"*AI confidence:* {confidence_str}"},
-                                {"type": "mrkdwn", "text": f"*Required role:* {approval.requested_role}"},
-                                {"type": "mrkdwn", "text": f"*Expires:* {approval.expires_at}"},
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*Blast radius:* {approval.blast_radius}",
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*AI confidence:* {confidence_str}",
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*Required role:* {approval.requested_role}",
+                                },
+                                {
+                                    "type": "mrkdwn",
+                                    "text": f"*Expires:* {approval.expires_at}",
+                                },
                             ],
                         },
                         {

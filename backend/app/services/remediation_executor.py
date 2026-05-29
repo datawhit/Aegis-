@@ -7,6 +7,7 @@ Two entrypoints:
 
 Both write audit chain entries at every state transition.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -54,9 +55,7 @@ class RemediationExecutor:
     ) -> ExecutionOutcome:
         action = (
             await session.execute(
-                select(RemediationAction).where(
-                    RemediationAction.id == remediation_action_id
-                )
+                select(RemediationAction).where(RemediationAction.id == remediation_action_id)
             )
         ).scalar_one_or_none()
         if action is None:
@@ -67,8 +66,7 @@ class RemediationExecutor:
             RemediationStatus.POLICY_ALLOWED,
         }:
             raise RemediationNotExecutableError(
-                f"action {action.id} is in state {action.status.value!r} "
-                "— cannot execute"
+                f"action {action.id} is in state {action.status.value!r} " "— cannot execute"
             )
 
         try:
@@ -165,9 +163,7 @@ class RemediationExecutor:
     ) -> ExecutionOutcome:
         action = (
             await session.execute(
-                select(RemediationAction).where(
-                    RemediationAction.id == remediation_action_id
-                )
+                select(RemediationAction).where(RemediationAction.id == remediation_action_id)
             )
         ).scalar_one_or_none()
         if action is None:
@@ -179,9 +175,7 @@ class RemediationExecutor:
                 "— only EXECUTED actions can be rolled back"
             )
         if not action.rollback_plan:
-            raise RemediationNotExecutableError(
-                f"action {action.id} has no rollback_plan defined"
-            )
+            raise RemediationNotExecutableError(f"action {action.id} has no rollback_plan defined")
 
         rollback_action_class = action.rollback_plan["action_class"]
         rollback_params = action.rollback_plan.get("parameters") or {}
@@ -193,8 +187,7 @@ class RemediationExecutor:
 
         if not connector.supports_rollback(action.action_class.value):
             raise RemediationNotExecutableError(
-                f"connector {connector.name} cannot rollback "
-                f"{action.action_class.value!r}"
+                f"connector {connector.name} cannot rollback " f"{action.action_class.value!r}"
             )
 
         await self._audit.record(

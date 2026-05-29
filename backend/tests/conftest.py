@@ -8,6 +8,7 @@
 Tests that need only the app (no DB) use `client`. Tests that exercise
 services / SQL queries use `db_session`.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator

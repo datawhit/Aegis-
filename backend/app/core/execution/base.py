@@ -16,6 +16,7 @@ Connectors MUST be:
   - **Side-effect contained.** No DB writes; no logging that mutates
     state. The remediation executor owns persistence.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

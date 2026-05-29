@@ -12,6 +12,7 @@ by `app.core.audit.logger.HashChainAuditLogger`. Computing it in the model
 would create a hidden ORM side-effect; computing it in the logger keeps the
 contract explicit.
 """
+
 from __future__ import annotations
 
 import enum
@@ -19,18 +20,19 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, Index, String, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, UUIDPKMixin
 
 
 class ActorType(str, enum.Enum):
-    USER = "user"           # a human, identified by users.id
-    SYSTEM = "system"       # internal scheduler/cron
-    AI = "ai"               # AI triage / decision engine
-    INTEGRATION = "integration"   # inbound webhook from an external system
-    SERVICE = "service"     # service-account user
+    USER = "user"  # a human, identified by users.id
+    SYSTEM = "system"  # internal scheduler/cron
+    AI = "ai"  # AI triage / decision engine
+    INTEGRATION = "integration"  # inbound webhook from an external system
+    SERVICE = "service"  # service-account user
 
 
 class AuditLog(Base, UUIDPKMixin):
@@ -48,17 +50,13 @@ class AuditLog(Base, UUIDPKMixin):
         Enum(ActorType, name="actor_type", native_enum=False),
         nullable=False,
     )
-    actor_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), nullable=True
-    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     actor_label: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
-    # What happened
-    action: Mapped[str] = mapped_column(String(128), nullable=False)             # e.g. "incident.created"
-    resource_type: Mapped[str] = mapped_column(String(64), nullable=False)      # e.g. "incident"
-    resource_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), nullable=True
-    )
+    # What happened (action = "incident.created"; resource_type = "incident")
+    action: Mapped[str] = mapped_column(String(128), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
 
     # Why / how (free-form structured payload + optional AI reasoning ref)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

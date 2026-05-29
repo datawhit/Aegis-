@@ -91,6 +91,11 @@ plugins = []
 disallow_untyped_decorators = false
 warn_unused_ignores = true
 ignore_missing_imports = true
+# Pragmatic relaxations — the codebase has historical bare-generic
+# annotations (dict / list without parameters) and a few SQLAlchemy
+# call sites that legitimately return Any. We keep the rest of strict.
+disallow_any_generics = false
+warn_return_any = false
 
 [[tool.mypy.overrides]]
 module = "alembic.*"

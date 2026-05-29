@@ -8,6 +8,7 @@ DSL + matching engine lands in Sprint 2. Until then, the stub returns
 The stub still walks the `policies` table so we get integration-level
 exercise of the model, even if no rule will ever match in this phase.
 """
+
 from __future__ import annotations
 
 import enum
@@ -64,14 +65,10 @@ class StubPolicyEngine(PolicyEngine):
       - eval errors → ESCALATE
     """
 
-    async def evaluate(
-        self, session: AsyncSession, request: PolicyEvalRequest
-    ) -> PolicyDecision:
+    async def evaluate(self, session: AsyncSession, request: PolicyEvalRequest) -> PolicyDecision:
         try:
             # Exercise the policies table even though we won't match.
-            result = await session.execute(
-                select(Policy).where(Policy.is_active.is_(True))
-            )
+            result = await session.execute(select(Policy).where(Policy.is_active.is_(True)))
             active_policies = result.scalars().all()
         except Exception as exc:  # pragma: no cover — defensive
             log.exception("policy.eval.failed", error=str(exc))

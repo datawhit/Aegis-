@@ -13,13 +13,13 @@ The task itself is sync (Celery's `@celery_app.task` is sync); we use
 `asyncio.run(...)` to drive the async pipeline. This is fine — each task
 runs in its own worker process with no event loop above it.
 """
+
 from __future__ import annotations
 
 import asyncio
 import uuid
 from datetime import UTC, datetime
-
-from sqlalchemy import select
+from typing import Any
 
 from app.core.audit import Actor, get_audit_logger
 from app.db import session_scope
@@ -34,7 +34,7 @@ log = get_logger("workers.triage")
 
 
 @celery_app.task(name="workflows.triage_alert", bind=True, acks_late=True)
-def triage_alert(self, workflow_run_id: str) -> dict:  # noqa: ARG001 (bind=True)
+def triage_alert(self: Any, workflow_run_id: str) -> dict:
     return asyncio.run(_run(uuid.UUID(workflow_run_id)))
 
 

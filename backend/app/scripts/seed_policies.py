@@ -7,6 +7,7 @@ autonomous execution per action class. The deny-all baseline catches
 anything unmodeled; specific ALLOW rules at higher priority enable
 demo flows.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -90,9 +91,7 @@ async def main() -> int:
     async with session_scope() as session:
         for spec in DEFAULT_POLICIES:
             existing = (
-                await session.execute(
-                    select(Policy).where(Policy.name == spec["name"])
-                )
+                await session.execute(select(Policy).where(Policy.name == spec["name"]))
             ).scalar_one_or_none()
             if existing is None:
                 policy = Policy(
@@ -108,11 +107,8 @@ async def main() -> int:
                 session.add(policy)
                 log.info("policy.seed.created", name=spec["name"])
             else:
-                existing.priority = spec["priority"]
-                existing.effect = spec["effect"]
-                existing.match = spec["match"]
-                existing.constraints = spec["constraints"]
-                existing.description = spec["description"]
+                for attr in ("priority", "effect", "match", "constraints", "description"):
+                    setattr(existing, attr, spec[attr])
                 existing.is_active = True
                 log.info("policy.seed.updated", name=spec["name"])
 

@@ -8,6 +8,7 @@ the protocol *here*, not in the implementation.
 
 See [docs/DECISIONS.md](../../../../docs/DECISIONS.md) ADR-002.
 """
+
 from __future__ import annotations
 
 import enum

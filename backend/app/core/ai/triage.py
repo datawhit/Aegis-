@@ -12,6 +12,7 @@ If the provider raises, the service synthesizes a low-confidence /
 incident (with reasoning="ai_failed") rather than silently dropping the
 alert. The policy engine will ESCALATE that case — which is correct.
 """
+
 from __future__ import annotations
 
 import uuid

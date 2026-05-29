@@ -1,4 +1,5 @@
 """Approvals endpoints: GET /approvals (inbox), POST /approvals/{id}/decision."""
+
 from __future__ import annotations
 
 import uuid
@@ -114,8 +115,6 @@ async def decide_approval(
         )
 
     approval = (
-        await session.execute(
-            select(Approval).where(Approval.id == approval_id)
-        )
+        await session.execute(select(Approval).where(Approval.id == approval_id))
     ).scalar_one()
     return ApprovalRead.model_validate(approval)

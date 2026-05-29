@@ -1,4 +1,5 @@
 """Defender connector — normalization spot-checks against the fixture."""
+
 from __future__ import annotations
 
 import json

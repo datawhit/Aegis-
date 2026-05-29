@@ -9,6 +9,7 @@ We do NOT exercise the Celery task in this test — Celery dispatch is
 mocked at the `send_task` boundary so the test runs without a broker.
 The triage pipeline itself is covered by `test_triage_service.py`.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -33,7 +34,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "defender_alert.json"
 
 def _signed_headers(body: bytes) -> dict[str, str]:
     ts = int(time.time())
-    message = f"{ts}.".encode("utf-8") + body
+    message = f"{ts}.".encode() + body
     sig = hmac.new(
         settings.ingest_secret_defender.encode("utf-8"),
         message,
@@ -51,16 +52,12 @@ def defender_body() -> bytes:
     return FIXTURE.read_bytes()
 
 
-async def test_ingest_rejects_missing_signature(
-    client: AsyncClient, defender_body: bytes
-) -> None:
+async def test_ingest_rejects_missing_signature(client: AsyncClient, defender_body: bytes) -> None:
     r = await client.post("/api/v1/ingest/defender", content=defender_body)
     assert r.status_code == 401
 
 
-async def test_ingest_rejects_unknown_source(
-    client: AsyncClient, defender_body: bytes
-) -> None:
+async def test_ingest_rejects_unknown_source(client: AsyncClient, defender_body: bytes) -> None:
     r = await client.post(
         "/api/v1/ingest/nope",
         content=defender_body,
@@ -95,18 +92,14 @@ async def test_ingest_persists_alert_and_submits_workflow(
     # but the rows persisted by the request are independent — we need to
     # clean them up.)
     alert = (
-        await db_session.execute(
-            select(Alert).where(Alert.id == alert_id)
-        )
+        await db_session.execute(select(Alert).where(Alert.id == alert_id))
     ).scalar_one_or_none()
     assert alert is not None
     assert alert.source == "defender"
     assert alert.source_event_id == json.loads(defender_body)["alertId"]
 
     run = (
-        await db_session.execute(
-            select(WorkflowRun).where(WorkflowRun.id == workflow_run_id)
-        )
+        await db_session.execute(select(WorkflowRun).where(WorkflowRun.id == workflow_run_id))
     ).scalar_one_or_none()
     assert run is not None
     assert run.workflow_name == "triage_alert"
@@ -157,16 +150,12 @@ async def test_ingest_dedupes_on_replay(
     alert_id = first.json()["alert_id"]
     workflow_id = first.json()["workflow_run_id"]
     for audit in (
-        await db_session.execute(
-            select(AuditLog).where(AuditLog.resource_id == alert_id)
-        )
+        await db_session.execute(select(AuditLog).where(AuditLog.resource_id == alert_id))
     ).scalars():
         await db_session.delete(audit)
     if (
         run := (
-            await db_session.execute(
-                select(WorkflowRun).where(WorkflowRun.id == workflow_id)
-            )
+            await db_session.execute(select(WorkflowRun).where(WorkflowRun.id == workflow_id))
         ).scalar_one_or_none()
     ) is not None:
         await db_session.delete(run)

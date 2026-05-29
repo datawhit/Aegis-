@@ -34,6 +34,7 @@ The canonicalization rule is the same shape used by `_compute_entry_hash`
 in `logger.py`: `json.dumps(..., sort_keys=True, separators=(",", ":"),
 allow_nan=False, ensure_ascii=False)`.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -78,10 +79,14 @@ def load_private_key(pem: str | None = None) -> Ed25519PrivateKey:
 
 
 def public_key_pem(private_key: Ed25519PrivateKey) -> str:
-    return private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode("utf-8")
+    return (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
 
 
 def generate_keypair_pem() -> tuple[str, str]:

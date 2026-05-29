@@ -3,9 +3,10 @@
 Used in tests to assert the executor dispatches correctly without
 touching real integrations.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from app.core.execution.base import ExecutionConnector, ExecutionResult
@@ -13,7 +14,7 @@ from app.core.execution.base import ExecutionConnector, ExecutionResult
 
 @dataclass
 class _Call:
-    kind: str           # "execute" | "rollback"
+    kind: str  # "execute" | "rollback"
     action_class: str
     parameters: dict[str, Any]
     idempotency_key: str
@@ -24,8 +25,7 @@ class StubExecutionConnector(ExecutionConnector):
 
     def __init__(self, *, fail_with: str | None = None) -> None:
         self._fail_with = fail_with
-        self.calls: list[_Call] = field(default_factory=list)  # type: ignore[assignment]
-        self.calls = []
+        self.calls: list[_Call] = []
 
     def supports(self, action_class: str) -> bool:
         return True

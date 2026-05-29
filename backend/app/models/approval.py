@@ -1,4 +1,5 @@
 """Approval model — human-in-the-loop approval state machine."""
+
 from __future__ import annotations
 
 import enum

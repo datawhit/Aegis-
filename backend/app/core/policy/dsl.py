@@ -41,6 +41,7 @@ Failure-mode contract (ADR-005):
   - Multiple policies at the same priority match → caller MUST ESCALATE.
   - No policy matches → caller MUST ESCALATE.
 """
+
 from __future__ import annotations
 
 import re
@@ -95,9 +96,7 @@ def evaluate_match(expr: Any, ctx: dict[str, Any]) -> bool:
 
     if op in {"eq", "in", "gte", "lte", "matches"}:
         if not isinstance(arg, dict) or len(arg) != 1:
-            raise PolicyDSLError(
-                f"`{op}` expects {{<field>: <value>}}, got {arg!r}"
-            )
+            raise PolicyDSLError(f"`{op}` expects {{<field>: <value>}}, got {arg!r}")
         (field, target) = next(iter(arg.items()))
         if field not in ctx:
             raise PolicyDSLError(f"field {field!r} not in evaluation context")
@@ -141,7 +140,7 @@ def _as_number(value: Any) -> float:
         # bool is a subclass of int in Python; treating True as 1 here would
         # mask schema errors. Refuse.
         raise PolicyDSLError("cannot compare boolean as number")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     raise PolicyDSLError(f"expected number, got {type(value).__name__}: {value!r}")
 
