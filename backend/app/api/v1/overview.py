@@ -231,9 +231,13 @@ async def _mean_response_time_seconds(session: AsyncSession, *, since: datetime)
         .group_by(AuditLog.resource_id)
         .subquery()
     )
-    stmt = select(
-        func.avg(func.extract("epoch", first_audit.c.first_audit_at - Incident.created_at))
-    ).join(Incident, Incident.id == first_audit.c.incident_id)
+    stmt = (
+        select(
+            func.avg(func.extract("epoch", first_audit.c.first_audit_at - Incident.created_at))
+        )
+        .select_from(first_audit)
+        .join(Incident, Incident.id == first_audit.c.incident_id)
+    )
     result = (await session.execute(stmt)).scalar()
     return float(result) if result is not None else None
 
