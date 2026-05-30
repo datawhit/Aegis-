@@ -33,20 +33,19 @@ from app.models.approval import Approval, ApprovalState
 from app.models.audit_log import AuditLog
 from app.models.incident import Incident, IncidentStatus
 from app.models.policy import Policy
-from app.models.remediation_action import RemediationAction, RemediationStatus
+from app.models.remediation_action import (
+    RemediationAction,
+    RemediationActionClass,
+    RemediationStatus,
+)
 
 router = APIRouter()
 
-# Action classes whose successful execution is best framed as
-# "containment" (the threat is bounded but the root cause still needs a
-# human follow-up). Resolutions everywhere else.
-_STABILIZATION_ACTION_CLASSES = {
-    "isolate_host",
-    "revoke_user_sessions",
-    "block_ip",
-    "block_domain",
-    "quarantine_file",
-}
+# Sprint 10: stabilization set lives on the enum (`is_stabilization`).
+# Materialised here as the raw string values for SQL `.in_()` clauses.
+_STABILIZATION_ACTION_CLASSES = frozenset(
+    c.value for c in RemediationActionClass if c.is_stabilization
+)
 
 
 # ---------------------------------------------------------------------------

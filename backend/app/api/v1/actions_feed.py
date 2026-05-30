@@ -28,20 +28,22 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 
 from app.api.deps import CurrentUserDep, SessionDep
+from app.models.audit_log import AuditLog
 from app.models.incident import Incident, IncidentStatus
-from app.models.remediation_action import RemediationAction, RemediationStatus
+from app.models.remediation_action import (
+    RemediationAction,
+    RemediationActionClass,
+    RemediationStatus,
+)
 
 router = APIRouter()
 
-# Mirrors overview.py — keep these aligned. (If we end up needing the set
-# in three places, move into the model file.)
-_STABILIZATION_ACTION_CLASSES = {
-    "isolate_host",
-    "revoke_user_sessions",
-    "block_ip",
-    "block_domain",
-    "quarantine_file",
-}
+# Sprint 10: source of truth is `RemediationActionClass.is_stabilization`
+# (R-37 close-out). String set materialised here for the outcome
+# classifier below.
+_STABILIZATION_ACTION_CLASSES = frozenset(
+    c.value for c in RemediationActionClass if c.is_stabilization
+)
 
 OutcomeLabel = Literal["resolved", "stabilized", "escalated"]
 
@@ -122,6 +124,26 @@ async def list_actions_feed(
     )
     rows = (await session.execute(stmt)).all()
 
+    # D-54: resolve the winning policy id for each action in a single
+    # auxiliary query. Source of truth is the `policy.evaluated` audit
+    # entry whose resource_id == remediation_action.id.
+    action_ids = [a.id for a, _ in rows]
+    policy_id_by_action: dict[str, str] = {}
+    if action_ids:
+        policy_rows = (
+            await session.execute(
+                select(
+                    AuditLog.resource_id,
+                    AuditLog.payload["winning_policy_id"].astext.label("policy_id"),
+                ).where(
+                    AuditLog.action == "policy.evaluated",
+                    AuditLog.resource_type == "remediation_action",
+                    AuditLog.resource_id.in_(action_ids),
+                )
+            )
+        ).all()
+        policy_id_by_action = {str(rid): pid for rid, pid in policy_rows if pid is not None}
+
     items: list[ActionFeedItem] = []
     counts: dict[str, int] = {"all": 0, "resolved": 0, "stabilized": 0, "escalated": 0}
     for action, incident in rows:
@@ -160,7 +182,7 @@ async def list_actions_feed(
                 ai_confidence=action.ai_confidence,
                 created_at=action.created_at,
                 executed_at=executed_at,
-                policy_id=None,  # join to policy.evaluated audit entry — Sprint 10
+                policy_id=policy_id_by_action.get(str(action.id)),
             )
         )
 

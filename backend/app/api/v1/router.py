@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     actions_feed,
     approvals,
+    assistant,
     audit,
     auth,
     health,
@@ -31,3 +32,5 @@ api_router.include_router(slack.router, tags=["slack"])
 # Sprint 9: operator-first surface area.
 api_router.include_router(overview.router, tags=["overview"])
 api_router.include_router(actions_feed.router, tags=["actions"])
+# Sprint 10: Aegis Assistant chat.
+api_router.include_router(assistant.router, tags=["assistant"])

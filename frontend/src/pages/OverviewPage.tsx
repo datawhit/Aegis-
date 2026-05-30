@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/authStore";
 import { getOverview, type OvernightSummary, type TrustScore } from "@/lib/overview";
 import { listActionsFeed, type ActionFeedItem, type ActionOutcome } from "@/lib/actions";
+import { AegisAssistantPanel } from "@/components/assistant/AegisAssistantPanel";
 
 /**
  * Sprint 9: the operator-first landing page.
@@ -58,7 +59,7 @@ export default function OverviewPage() {
 
           <RequiresAttentionRow attention={overview.requires_attention} />
 
-          <AegisAssistantShell />
+          <AegisAssistantPanel />
         </>
       )}
     </div>
@@ -508,60 +509,3 @@ function RequiresAttentionRow({
   );
 }
 
-/* ─── Aegis Assistant (BETA shell — chat backend lands in Sprint 10) ─ */
-
-function AegisAssistantShell() {
-  const [question, setQuestion] = useState("");
-  const suggestions = [
-    "What did you do overnight?",
-    "Why did you revoke this session?",
-    "Which policies generated the most actions?",
-    "How much risk did we reduce this week?",
-  ];
-  return (
-    <section className="rounded-lg border border-aegis-accent/30 bg-aegis-panel p-4">
-      <header className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-aegis-text">Aegis Assistant</h2>
-        <span className="rounded border border-aegis-accent/40 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-aegis-accent">
-          beta
-        </span>
-      </header>
-      <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-aegis-muted">
-        Ask Aegis anything about your security operations
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {suggestions.map((q) => (
-          <button
-            key={q}
-            type="button"
-            onClick={() => setQuestion(q)}
-            className="rounded border border-aegis-border bg-aegis-bg px-3 py-1.5 font-mono text-[11px] text-aegis-muted hover:border-aegis-accent hover:text-aegis-text"
-          >
-            {q}
-          </button>
-        ))}
-      </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          window.alert("Aegis Assistant chat lands in Sprint 10.");
-        }}
-        className="mt-3 flex items-center gap-2"
-      >
-        <input
-          type="text"
-          placeholder="Ask Aegis…"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          className="flex-1 rounded border border-aegis-border bg-aegis-bg px-3 py-2 text-sm text-aegis-text focus:border-aegis-accent focus:outline-none"
-        />
-        <button
-          type="submit"
-          className="rounded bg-aegis-accent px-3 py-2 font-mono text-xs text-aegis-bg"
-        >
-          send
-        </button>
-      </form>
-    </section>
-  );
-}

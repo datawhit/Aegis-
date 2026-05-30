@@ -40,6 +40,20 @@ class RemediationActionClass(str, enum.Enum):
         """
         return self not in _NON_REVERSIBLE_ACTIONS
 
+    @property
+    def is_stabilization(self) -> bool:
+        """Whether a successful execution is best framed as containment
+        rather than resolution.
+
+        Stabilizations bound the threat but leave a follow-up for a human
+        (re-image the host, rotate credentials, restore the file). The
+        Aegis Actions Feed and the Overview's "Requires Your Attention"
+        row use this to label outcomes as "stabilized" instead of
+        "resolved". Sprint 9 had this set hard-coded in two endpoints
+        (R-37); Sprint 10 moves the truth into the enum.
+        """
+        return self in _STABILIZATION_ACTIONS
+
 
 _NON_REVERSIBLE_ACTIONS: frozenset[RemediationActionClass] = frozenset(
     {
@@ -47,6 +61,17 @@ _NON_REVERSIBLE_ACTIONS: frozenset[RemediationActionClass] = frozenset(
         RemediationActionClass.FORCE_PASSWORD_RESET,
         RemediationActionClass.NOTIFY_SLACK,
         RemediationActionClass.CUSTOM,  # unknown blast radius — fail closed
+    }
+)
+
+
+_STABILIZATION_ACTIONS: frozenset[RemediationActionClass] = frozenset(
+    {
+        RemediationActionClass.ISOLATE_HOST,
+        RemediationActionClass.REVOKE_USER_SESSIONS,
+        RemediationActionClass.BLOCK_IP,
+        RemediationActionClass.BLOCK_DOMAIN,
+        RemediationActionClass.QUARANTINE_FILE,
     }
 )
 

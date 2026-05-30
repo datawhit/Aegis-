@@ -163,6 +163,16 @@ class IncidentService:
             )
             proposed.status = _map_policy_to_remediation_status(policy_decision.effect)
 
+            # `winning_policy_id` is the representative id for the decision —
+            # the single id for an unambiguous match, or the first one when
+            # the engine groups multiple matches (DENY set, equal-priority
+            # conflict). Indexes the audit chain for the Overview's
+            # Top Active Policies panel + the Actions Feed's policy join.
+            winning_policy_id = (
+                policy_decision.matched_policy_ids[0]
+                if policy_decision.matched_policy_ids
+                else None
+            )
             await self._audit.record(
                 session,
                 actor=Actor.system(label="policy.engine"),
@@ -171,6 +181,7 @@ class IncidentService:
                 resource_id=proposed.id,
                 payload={
                     "effect": policy_decision.effect.value,
+                    "winning_policy_id": winning_policy_id,
                     "matched_policy_ids": policy_decision.matched_policy_ids,
                     "reasons": policy_decision.reasons,
                 },

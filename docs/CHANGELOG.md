@@ -2772,3 +2772,277 @@ goes into it.
 ---
 
 > End of Sprint 09. Next entry: **Sprint 10 — Aegis Assistant + Decision Record depth.**
+
+---
+
+## SPRINT 10 — AEGIS ASSISTANT
+
+- **DATE:** 2026-05-30
+- **STATUS:** Delivered. Awaiting review before Sprint 11 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Wire the Aegis Assistant shell from Sprint 09 to a real chat backend.
+The Assistant is the operator-facing AI surface — distinct from the
+per-incident AI Reasoning panel (per Q39: parallel surfaces). It is
+strictly read-only (OQ-35): summarise + explain what Aegis already
+did, never propose new actions.
+
+Plus the two small carry-overs from Sprint 09 — `is_stabilization`
+property on the enum (R-37 close-out) and `policy_id` join on the
+actions feed (D-54).
+
+The full "Decision Record tabs" portion of the original Sprint 10
+plan is pushed to Sprint 11 — the Assistant build was substantial
+enough on its own.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **`AssistantService`** (`app/core/ai/assistant.py`) — Claude-backed
+  (matches Triage, ADR-007 / OQ-34). Tool-use loop with four
+  read-only tools:
+  - `get_overview` — returns overnight summary + trust + risk +
+    requires-attention.
+  - `get_recent_actions` — recent action feed entries, filterable
+    by outcome.
+  - `get_action_detail` — single action's class / status / policy /
+    incident, including the `is_stabilization` and `is_reversible`
+    properties.
+  - `get_top_policies` — top N policies by `policy.evaluated`
+    activity.
+- **`POST /api/v1/assistant/chat`** — stateless endpoint that runs
+  the tool-use loop (capped at 4 rounds) and returns `{answer,
+  sources, tool_calls, model}`.
+- **`AssistantSource`** capture — sources are derived from the tool
+  call record, not from the model's prose. UI can't be tricked into
+  rendering fabricated links.
+- **Friendly 503** when `AEGIS_ANTHROPIC_API_KEY` is empty —
+  local dev without a key sees a clear error instead of an
+  unhandled crash.
+- **Frontend `AegisAssistantPanel`** replaces the Sprint-9 placeholder
+  shell. Holds local transcript state, renders sources as
+  clickable links coloured by kind (incident / action / policy),
+  shows "Aegis is thinking…" while a turn is in flight.
+- **`RemediationActionClass.is_stabilization`** property (R-37) —
+  source of truth for the stabilisation set; overview + actions
+  feed now read the enum instead of duplicating a hard-coded
+  string set.
+- **Actions Feed `policy_id`** (D-54) — auxiliary query joins the
+  `policy.evaluated` audit entry to fill the field. `incident_service`
+  now writes `winning_policy_id` in that audit payload so both this
+  join and the Sprint-9 top-policies query find data.
+- **Test layer** for the tool implementations — direct unit tests
+  hit the SQL paths without a live Anthropic round trip.
+
+Explicitly out of scope:
+
+- Decision Record tabs (Overview / AI Reasoning / Risk & Evidence /
+  Related Alerts / Audit Trail) — Sprint 11.
+- KMS adapter (D-37) — re-scheduled again; not Sprint 10's
+  focus.
+- Streaming responses (SSE) — UI shows a spinner, real-time word-
+  by-word arrives in Sprint 11 if real use justifies it.
+- Server-side conversation history. Each turn is independent today
+  (Sprint 11 candidate).
+
+### SECURITY CONSIDERATIONS
+
+- **Tools are strictly read-only.** `_TOOL_DISPATCH` contains only
+  read functions. Even if the model hallucinates a write tool, the
+  dispatch returns `{"error": "unknown tool"}`.
+- **No tool overrides on the API surface.** The endpoint accepts
+  only `{"message": "..."}`. Operators cannot inject custom tools
+  or extend the model's permissions.
+- **Tool-call recursion is capped at 4 rounds** to bound LLM cost +
+  prevent runaway tool loops.
+- **Sources are derived from tool results, not model output.** A
+  model that fabricates "incident #abc-123" without calling a tool
+  produces no link.
+- **Citations are read-only references** — clicking a source link
+  navigates to an existing page; nothing about the Assistant
+  enables a new write path.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-023** Aegis Assistant: tool-use RAG, read-only, Claude-backed
+
+### FEATURES IMPLEMENTED
+
+| Feature                                          | Status | Notes                                              |
+| ------------------------------------------------ | ------ | -------------------------------------------------- |
+| `AssistantService` with 4 read-only tools         | ✅     | Claude-sonnet-4-6; 4-round cap                     |
+| `POST /api/v1/assistant/chat`                     | ✅     | Stateless; 503 on missing API key                  |
+| Source capture from tool calls                    | ✅     | Three kinds: incident / action / policy             |
+| Frontend `AegisAssistantPanel`                    | ✅     | Local transcript, source link chips, "thinking…"   |
+| `RemediationActionClass.is_stabilization`         | ✅     | Closes R-37; overview + feed read the enum         |
+| Actions feed `policy_id`                          | ✅     | D-54 closed; auxiliary query, no schema change     |
+| `winning_policy_id` in `policy.evaluated` audit    | ✅     | Powers both top-policies query and feed join       |
+| Tool tests against the DB                         | ✅     | 6 cases; no live API key required                  |
+
+### FILES CREATED (4)
+
+- `backend/app/core/ai/assistant.py`
+- `backend/app/api/v1/assistant.py`
+- `backend/tests/test_assistant_tools.py`
+- `frontend/src/lib/assistant.ts`
+- `frontend/src/components/assistant/AegisAssistantPanel.tsx`
+
+### FILES MODIFIED (notable)
+
+- `backend/app/models/remediation_action.py` — new
+  `is_stabilization` property + `_STABILIZATION_ACTIONS` frozenset
+- `backend/app/api/v1/overview.py` — pulls stabilisation set from
+  the enum
+- `backend/app/api/v1/actions_feed.py` — same plus `policy_id` join
+- `backend/app/api/v1/router.py` — wire `assistant` router
+- `backend/app/services/incident_service.py` — write
+  `winning_policy_id` in `policy.evaluated` audit payload
+- `frontend/src/pages/OverviewPage.tsx` — swap inline shell for
+  the real `<AegisAssistantPanel>`
+- `docs/DECISIONS.md` — ADR-023
+
+### DATABASE CHANGES
+
+**None.** Every new behavior reads existing tables. The
+`winning_policy_id` field is added to an audit payload, which is
+JSONB and append-only — no schema migration.
+
+### API CHANGES
+
+| Method | Path                          | Auth    | Description                                   |
+| ------ | ----------------------------- | ------- | --------------------------------------------- |
+| POST   | `/api/v1/assistant/chat`      | bearer  | `{message}` → `{answer, sources, tool_calls, model}` |
+| GET    | `/api/v1/actions/feed`        | bearer  | `policy_id` field now populated (was always null) |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                                | Owed-by Sprint |
+| ---- | --------------------------------------------------------------------------------------------------- | -------------- |
+| D-59 | Assistant has no server-side conversation memory — each turn is independent                          | Sprint 11      |
+| D-60 | Assistant chat endpoint isn't streaming — UI waits for the full answer                              | Sprint 11      |
+| D-61 | Tool-call round cap (4) is hard-coded — should adapt to query complexity                            | Sprint 11+     |
+| D-62 | No per-tenant or per-user rate limiting on `/assistant/chat` — cost exposure scales with chat volume | Sprint 11      |
+| D-63 | Source-link routing for actions points at incident detail (no dedicated action page yet)            | Sprint 11      |
+| D-64 | Assistant has no chat history persistence — closing the tab loses the conversation                   | Sprint 11      |
+
+(Open from prior sprints: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40, D-43, D-45, D-47–D-58.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-38 | Long-running tool loops on a slow DB tip the model over the 4-round cap before answering              | Low        | Low      | Cap returns a partial answer + the tool-call log so the operator sees what happened |
+| R-39 | Tool result JSON balloons with large arrays (e.g. 20 actions × full payload), hitting model context limits | Medium | Medium | Each tool already returns a trimmed shape; widen cautiously                       |
+| R-40 | Model fabricates an answer when a tool returns `{"error": ...}` instead of saying "no data"           | Low        | Medium   | System prompt says explicitly: "If a tool returns no data, say so plainly." Add a regression test once a live API key is in CI |
+
+### ROLLBACK STRATEGY
+
+- **Endpoint:** removing the include in `router.py` retires the
+  endpoint; the AssistantService stays dormant.
+- **Panel:** swap `<AegisAssistantPanel>` back to the old inline
+  shell (preserved in git history).
+- **`is_stabilization`:** removing the property + re-introducing
+  the hard-coded set in overview/actions_feed is a 5-line revert.
+  No data is migrated.
+- **`winning_policy_id` audit payload:** backwards-compatible —
+  older audit entries without the field are tolerated by both
+  consumers (top-policies query, actions feed join).
+
+### KNOWN LIMITATIONS
+
+1. **No streaming.** Each turn waits for the full model response.
+2. **No conversation memory across requests.** Each turn is
+   stateless on the server (D-59).
+3. **Source links navigate to incident detail** for action sources
+   — there's no dedicated `/actions/:id` page yet (D-63).
+4. **Tool cap = 4.** Multi-hop questions may hit it (R-38).
+5. **No rate limit.** A buggy client could blast `/assistant/chat`
+   and run up the Anthropic bill (D-62).
+
+### OBSERVABILITY (current state)
+
+- **Logs:** new structured events: `assistant.chat.completed` (with
+  round count + tool list), `assistant.chat.tool_loop_cap` (warn
+  when the cap is hit), `assistant.tool.error` (exception inside a
+  tool).
+- **Metrics:** OTel auto-instrumentation already covers the new
+  endpoint via the FastAPI integration. Per-tool histograms could
+  be added in Sprint 11 (D-44 follow-up).
+- **Traces:** Anthropic SDK doesn't trace itself, but the
+  surrounding async DB calls in tools do.
+
+### NEXT STEPS — Sprint 11 candidate scope
+
+Working title: **"Risk Analytics + Decision Record depth."**
+
+1. **Risk Analytics page** — trend charts, categorised risk
+   reduction, policy effectiveness over time. Backs the
+   pillar from ADR-022.
+2. **Decision Record tabs** — Overview / AI Reasoning / Risk &
+   Evidence / Related Alerts / Audit Trail (carry-over from
+   Sprint 10).
+3. **Assistant: server-side conversation history + streaming**
+   (D-59 / D-60).
+4. **Assistant rate limit + budget cap** (D-62).
+5. **`/actions/:id` page** for dedicated action detail (D-63).
+
+Carry-over backlog: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36,
+D-37, D-40, D-43, D-45, D-47–D-58, D-59–D-64.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-37 | Server-side chat history — per-user only, or per-team for collaboration?                                | Sprint 11 |
+| OQ-38 | Streaming protocol — Server-Sent Events (simple, well-supported) or WebSocket (bi-directional, more infra)? | Sprint 11 |
+| OQ-39 | Per-tenant Assistant budget — hard daily cap, or soft warning with admin opt-out?                       | Sprint 11 |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 10 closeout
+
+### 1. Assistant as the demo voice
+
+The Assistant is now the most visible AI surface — a chat that
+narrates Aegis's work. It's a stronger sales artifact than a
+static dashboard.
+
+- **Q41.** Do we re-record the Sprint-7 audit-chain demo with the
+  Assistant as the narrator? "Watch a SOC manager ask 'what did
+  you do overnight?' and get an actual answer" reframes the demo
+  arc from data-tour to conversation.
+
+### 2. The Assistant's tone
+
+The system prompt today asks for "concise, plain language, no
+marketing." That's a defensive choice — it stops the model from
+overselling. But there's a tonal question: should the Assistant
+*sound* like an operator (terse, technical) or like a briefing
+(narrative, contextual)?
+
+- **Q42.** Briefing tone is friendlier to executive personas.
+  Operator tone is friendlier to SOC analysts. The buyer (Q11)
+  determines which. Worth a deliberate pick before we lock the
+  prompt.
+
+### 3. Read-only as a feature, not a limitation
+
+Sprint 10 made an explicit choice that the Assistant cannot take
+action. That's a posture statement — "Aegis is autonomous; the
+Assistant is its narrator." But buyers may ask whether a future
+"approve via chat" mode is on the roadmap.
+
+- **Q43.** Lock the no-write rule as a permanent product
+  invariant ("the audit chain is the authority; the Assistant is
+  the explanation"), or leave it open for Sprint 13+ as a
+  premium-tier feature? Recommendation: **permanent invariant**.
+  The product story is stronger when "the AI explains, humans
+  decide for the borderline cases" stays clean.
+
+---
+
+> End of Sprint 10. Next entry: **Sprint 11 — Risk Analytics + Decision Record depth.**

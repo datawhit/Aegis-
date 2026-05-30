@@ -671,6 +671,64 @@
 
 ---
 
+## ADR-023 — Aegis Assistant: tool-use RAG, read-only, Claude-backed
+
+- **Date:** 2026-05-30 (Sprint 10)
+- **Status:** Accepted; settles OQ-34 (Claude-backed) and OQ-35
+  (strictly read-only).
+- **Context:** Sprint 9 shipped the Assistant shell — suggested
+  queries, input box, no backend. Sprint 10 wires the chat. The
+  architectural choice was: build embedding-based RAG over the audit
+  chain + policies, or expose structured tools the model can call
+  against the existing DB. The latter is simpler, more
+  deterministic, and produces auditable citations for free.
+- **Decision:**
+  - Reuse the existing `AnthropicAIProvider` ergonomics: same SDK,
+    same model (`claude-sonnet-4-6`), same Anthropic API key.
+  - Define a small set of read-only tools in
+    `app/core/ai/assistant.py`: `get_overview`,
+    `get_recent_actions`, `get_action_detail`, `get_top_policies`.
+    Each is a plain async function `(session, args) -> dict`.
+  - Loop: model → maybe tool_use → execute → feed result back →
+    repeat (capped at 4 rounds).
+  - Sources are derived from the tool-call record, not from the
+    model — the model can't fabricate a clickable link.
+  - Endpoint `POST /api/v1/assistant/chat` is stateless on the
+    server. Each turn is a fresh request; the frontend keeps the
+    transcript locally.
+- **Strictly read-only.** No tool can write, mutate policy state,
+  approve, deny, or rollback. If the operator asks the Assistant
+  to "approve action X" it should say "I can only read; use the
+  Review Queue." This is enforced structurally: the
+  `_TOOL_DISPATCH` map contains only read functions, and the
+  endpoint doesn't accept tool overrides.
+- **Why tool-use over embedding-RAG:**
+  - The data we want the model to ground in is already structured
+    (audit chain, remediation_actions, policies). Embedding it
+    would be lossy.
+  - Tool results are cheap and reproducible — a `get_overview`
+    call returns the same shape each time, which makes regression
+    tests trivial.
+  - We get citations for free: every linked source is something a
+    tool returned.
+  - Sprint 11+ can add new tools without retraining anything.
+- **Consequences:**
+  - + Predictable surface area. The Assistant can only see what we
+    explicitly let it see.
+  - + Auditable: every tool call is logged at INFO; the conversation
+    transcript stays local until we want server-side history.
+  - + Costs are bounded — each turn is at most 4 model calls + 4
+    DB reads.
+  - – Hard cap of 4 tool-call rounds means complex multi-hop
+    questions ("of the escalations last night, which one had the
+    highest blast radius, and what policy almost let it through")
+    may time out in the loop. Sprint 11 raises the cap if real use
+    needs it.
+  - – No streaming responses today. UI shows "Aegis is thinking…"
+    until the final answer arrives. Streaming is polish; defer.
+
+---
+
 ## ADR template (for future ADRs)
 
 ```
