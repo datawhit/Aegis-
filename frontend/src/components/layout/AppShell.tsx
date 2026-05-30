@@ -19,6 +19,12 @@ export function AppShell() {
           <Link to="/approvals" className="hover:text-aegis-text">
             approvals
           </Link>
+          <Link to="/policies" className="hover:text-aegis-text">
+            policies
+          </Link>
+          <Link to="/audit-logs" className="hover:text-aegis-text">
+            audit
+          </Link>
           <span className="text-aegis-muted">
             {user?.email} · {user?.role}
           </span>

@@ -1473,4 +1473,257 @@ action gets rolled back, an admin had to make that call. That's a
 
 ---
 
-> End of Sprint 04. Next entry: **Sprint 05 — Operational visibility + observability.**
+> End of Sprint 04. Next entry: **Sprint 05 — Frontend visibility.**
+
+---
+
+## SPRINT 05 — FRONTEND VISIBILITY
+
+- **DATE:** 2026-05-29
+- **STATUS:** Delivered. Awaiting review before Sprint 6 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Make the backend the system has been building visible to the operators
+who use it. The compliance bones from Sprint 04 are pointless if a
+reviewer has to `curl` for them; the policy DSL from Sprint 02 is
+inert if no one but admins-via-`make seed-policies` can author it.
+
+This sprint adds three things to the React app: a paginated audit-chain
+explorer, full CRUD for policies, and search/scope filters on the
+approval inbox. It also adds the small backend slice — paginated
+`/audit/logs` JSON read — that the explorer needs.
+
+A secondary win: this is the first sprint where the CI pipeline is
+fully green end-to-end. Sprints 0–4 all pushed red builds (lint/format
+gaps, missing pydantic[email], passlib/bcrypt 4.x incompat, an invalid
+`GRANT CONNECT ON DATABASE CURRENT_DATABASE()` in migration 0002,
+test client/db_session connection sharing, asyncpg pool pool/event-loop
+mismatches, and an audit-chain ordering bug from
+`now()` being transaction-scoped). All resolved in the run-up to this
+sprint; the changelog entries for those land here as well so the audit
+trail of "why CI changed" is honest.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **`GET /api/v1/audit/logs`** — paginated JSON read on `audit_logs`,
+  admin-or-reviewer, filterable by `actor_type` / `action` /
+  `resource_type`, newest-first ordering. Distinct from the existing
+  signed `/audit/export` (NDJSON stream + receipt).
+- **Audit-chain explorer page** (`/audit-logs`) — list + detail
+  side-by-side, pagination, filter chips, JSON payload viewer, plus
+  a "download signed export" button that hits `/audit/export`.
+- **Policies list page** (`/policies`) — priority + effect + name +
+  status + last-edited columns; "+ new policy" only renders for
+  admins.
+- **Policy editor page** (`/policies/:id` and `/policies/new`) — full
+  CRUD form with raw JSON editors for `match` and `constraints` (the
+  DSL is JSON; a visual rule-builder is OQ-16 deferred). Read-only
+  for non-admins with an explanatory banner. Delete behind
+  `window.confirm`.
+- **Approval inbox polish** — pending/all scope toggle, search box
+  that filters by title/action_class/ai_summary, retained 5s
+  auto-refetch.
+- **AppShell nav** picks up two new links (`policies`, `audit`).
+- **CI fixes** (described above) so this sprint and every future one
+  ships against a green main.
+
+Explicitly out of scope:
+
+- Visual rule-builder for the DSL (OQ-16).
+- Mobile-responsive layout pass; current shell is desktop-first and
+  the new pages inherit that.
+- OTel observability (D-3, the originally-planned Sprint 5 headline —
+  deferred again so frontend ships now).
+- Audit-chain signature verification from the UI (still requires the
+  standalone CLI from Sprint 04).
+
+### SECURITY CONSIDERATIONS
+
+- **No new write paths from the UI bypass server checks.** Policy
+  edit forms POST/PUT/DELETE through the existing admin-gated
+  endpoints; the frontend admin check is a UX affordance only.
+- **The audit-logs read endpoint has the same reviewer-or-admin gate
+  as `/audit/export`.** No new visibility surface for VIEWER or
+  OPERATOR.
+- **JSON in the DSL editor is parsed client-side before submit;**
+  server still revalidates with `evaluate_match()` (Sprint 02
+  invariant). Malformed JSON shows a red error rather than firing an
+  invalid request.
+
+### ARCHITECTURAL DECISIONS
+
+No new ADRs this sprint — every choice fits inside the existing
+authorization + DSL + audit decisions. CI infra changes are
+documented inline above and in the commit history.
+
+### FEATURES IMPLEMENTED
+
+| Feature                                  | Status | Notes                                              |
+| ---------------------------------------- | ------ | -------------------------------------------------- |
+| `GET /api/v1/audit/logs` (paginated)     | ✅     | Admin-or-reviewer; 3 filter dimensions             |
+| Audit-chain explorer UI                  | ✅     | List + detail pane + filters + pagination + export |
+| Policies list page                       | ✅     | Priority-ordered; "+ new" admin-only                |
+| Policy editor (create/edit/delete)       | ✅     | JSON editor for `match` + `constraints`; read-only banner for non-admins |
+| Approval inbox: pending/all toggle       | ✅     |                                                    |
+| Approval inbox: search filter            | ✅     | Title / action_class / ai_summary                  |
+| AppShell nav: `policies`, `audit` links  | ✅     |                                                    |
+| CI: backend (ruff + format + mypy + pytest) | ✅  | Green for first time in project history            |
+| CI: frontend (eslint + tsc + build)      | ✅     |                                                    |
+
+### FILES CREATED (5)
+
+- `backend/alembic/versions/0003_audit_logs_clock_timestamp.py`
+- `frontend/src/lib/policies.ts`
+- `frontend/src/lib/auditLogs.ts`
+- `frontend/src/pages/PoliciesListPage.tsx`
+- `frontend/src/pages/PolicyDetailPage.tsx`
+- `frontend/src/pages/AuditLogsPage.tsx`
+
+### FILES MODIFIED (notable)
+
+- `backend/app/api/v1/audit.py` — `/audit/logs` paginated read added,
+  `audit.exported` entry excluded from its own export by ID
+- `backend/app/models/audit_log.py` — `created_at` default switched
+  to `clock_timestamp()` (chain ordering fix)
+- `backend/tests/conftest.py` — `engine.dispose()` per test +
+  `dependency_overrides[get_session]` so `client` sees `db_session` state
+- `backend/pyproject.toml` — `pydantic[email]`, `bcrypt==4.0.1`,
+  `asyncio_default_fixture_loop_scope = "function"`
+- `backend/alembic/versions/0002_audit_writer_role.py` — `GRANT
+  CONNECT ON DATABASE` switched from invalid `CURRENT_DATABASE()` to a
+  `DO $$ ... EXECUTE format(...) ... $$` block
+- `frontend/package.json` — typecheck/build use `tsc --noEmit -p
+  tsconfig.json` (composite + `noEmit` was rejected by tsc)
+- `frontend/src/App.tsx` — three new routes
+- `frontend/src/components/layout/AppShell.tsx` — two new nav links
+- `frontend/src/pages/ApprovalInboxPage.tsx` — scope toggle + search
+- `frontend/src/vite-env.d.ts` — added (`import.meta.env` typing)
+- `frontend/package-lock.json` — added (was untracked since Sprint 02)
+
+### DATABASE CHANGES
+
+Migration `0003_audit_logs_clock_timestamp`:
+
+- `ALTER TABLE audit_logs ALTER COLUMN created_at SET DEFAULT
+  clock_timestamp()` (was `now()`). Existing rows unaffected; only
+  the default changes. Downgrade reverts to `now()`.
+
+### API CHANGES
+
+| Method | Path                  | Auth              | Description                            |
+| ------ | --------------------- | ----------------- | -------------------------------------- |
+| GET    | `/api/v1/audit/logs`  | admin or reviewer | Paginated read; `actor_type`/`action`/`resource_type` filters |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                            | Owed-by Sprint |
+| ---- | ----------------------------------------------------------------------------------------------- | -------------- |
+| D-32 | Mobile-responsive layout pass — current grid breaks on narrow viewports                          | Sprint 6       |
+| D-33 | Policy editor JSON editors have no schema-aware autocomplete / linting                          | Sprint 6+      |
+| D-34 | Audit-logs page exposes the signed export download to any reviewer with no per-day rate limit  | Sprint 6       |
+| D-35 | `engine.dispose()` per test fixture is heavy — fine at this scale but worth revisiting          | Sprint 7+      |
+| D-36 | Approval inbox search is client-side over the page result, not a server query                  | Sprint 6+      |
+
+(Open from prior sprints: D-3, D-7, D-22, D-23, D-25, D-26–D-31.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-24 | JSON DSL editor lets an admin save a syntactically-valid-but-semantically-broken policy that escalates everything | Medium     | Medium   | Server-side `evaluate_match()` rejects DSL errors at write time; UI shows error  |
+| R-25 | Audit-logs page over-fetches if an analyst leaves it open with no filter — cost is O(rows) per page  | Low        | Low      | Default limit=50; max=500. Add server-side max if abused.                        |
+
+### ROLLBACK STRATEGY
+
+- **Schema:** migration 0003 is reversible (alters column default only).
+- **Frontend:** removing the new routes from `App.tsx` reverts the
+  feature surface; no data is migrated client-side.
+- **Backend `/audit/logs`:** removing the route is a clean revert; the
+  `audit_logs` table is unchanged otherwise.
+
+### KNOWN LIMITATIONS
+
+1. **Desktop-first layout.** Pages assume ≥1024px; lg breakpoint
+   stacks the audit detail pane but the policy editor and approvals
+   are dense at mobile widths.
+2. **DSL editor is raw JSON.** No autocomplete, no live evaluation;
+   syntax errors are reported on submit.
+3. **Audit signature verification in-UI** is intentionally NOT here —
+   the standalone CLI (`python -m app.scripts.verify_audit_export`)
+   remains the trust root.
+4. **Approval search is client-side** over the current page result
+   only — not a full-text server query.
+
+### OBSERVABILITY (current state)
+
+- **Logs:** unchanged from Sprint 04 (still no OTel; D-3 carried).
+- **Audit chain:** the explorer reads through the new `/audit/logs`
+  endpoint; reads themselves are NOT audited (writes are).
+- **UI metrics:** none — would need page-view instrumentation as
+  part of Sprint 6 OTel work.
+
+### NEXT STEPS — Sprint 06 candidate scope
+
+Working title: **"Operational visibility (for real this time)."**
+
+D-3 has now been deferred FOUR sprints. Sprint 6 should be a
+concentrated observability push:
+
+1. **OTel collector container** in `docker-compose.yml`.
+2. **FastAPI + SQLAlchemy + Celery + httpx auto-instrumentation.**
+3. **Grafana + dashboard JSON** for the high-leverage views:
+   request latency p50/p95, AI cost per tenant, approval-decision
+   latency, policy-effect distribution.
+4. **Mobile layout pass** (D-32).
+5. **Production guardrail:** refuse `require_signature=false` in
+   non-local env (R-23, deferred from Sprint 4).
+6. **Signing-key rotation + key registry** (D-26, D-27) — the second
+   half of Sprint 04's compliance wedge.
+
+Carry-over backlog: D-7, D-22, D-23, D-25, D-26–D-36.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                 | Needed by |
+| ----- | -------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-22 | Audit signature verification: keep CLI-only (security-conscious) or surface in-UI for analyst convenience? | Sprint 6  |
+| OQ-23 | Policy editor: when do we ship the visual rule-builder vs. living with raw JSON?                          | Sprint 7  |
+| OQ-24 | Should the audit-logs endpoint support full-text search across `payload`, or stay structured-filter-only? | Sprint 6  |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 05 closeout
+
+Prior sprints' questions still stand. Two surfaced from making the
+backend visible:
+
+### 1. Reviewer-as-Sales-Motion (Q27 reprise)
+
+The audit-chain explorer is now demoable to a compliance officer in
+the browser, not just via a downloaded NDJSON.
+
+- **Q29.** Do we record the reviewer-walkthrough demo and use it as
+  a sales asset (a 90-second clip of "your auditor opens this page,
+  filters, exports, runs the verifier") for procurement
+  conversations?
+
+### 2. The policy editor as a co-design surface
+
+Sprint 02 shipped the JSON DSL; this sprint makes it editable from
+the UI. Customers in the design-partner phase can now author + tune
+their own policies without filing tickets.
+
+- **Q30.** Do we offer a "policy review" service as part of
+  onboarding — the first month, a senior person on our side reviews
+  every customer-authored policy and pairs on tuning? This shortens
+  time-to-value but caps how many design partners we can run
+  concurrently.
+
+---
+
+> End of Sprint 05. Next entry: **Sprint 06 — Operational visibility (for real).**

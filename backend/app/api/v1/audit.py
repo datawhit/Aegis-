@@ -14,7 +14,8 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import func, select
 
 from app.api.deps import AdminOrReviewerDep, SessionDep
 from app.config import settings
@@ -31,6 +32,13 @@ from app.models.audit_log import AuditLog
 
 router = APIRouter()
 log = get_logger("audit.export")
+
+
+class AuditLogPage(BaseModel):
+    items: list[dict]
+    total: int
+    limit: int
+    offset: int
 
 
 def _serialize_audit_log(row: AuditLog) -> dict:
@@ -52,6 +60,51 @@ def _serialize_audit_log(row: AuditLog) -> dict:
         "prev_hash": row.prev_hash,
         "entry_hash": row.entry_hash,
     }
+
+
+@router.get("/audit/logs", response_model=AuditLogPage)
+async def list_audit_logs(
+    session: SessionDep,
+    current_user: AdminOrReviewerDep,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    actor_type: str | None = Query(None),
+    action: str | None = Query(None),
+    resource_type: str | None = Query(None),
+) -> AuditLogPage:
+    """Paginated read for the audit-chain explorer UI (Sprint 5).
+
+    Ordering is newest-first by (created_at, id) — operators reading the
+    log expect "what just happened" at the top. The verifier still walks
+    the chain in ascending order; this endpoint is purely a UI surface.
+    """
+    base = select(AuditLog)
+    if actor_type is not None:
+        base = base.where(AuditLog.actor_type == actor_type)
+    if action is not None:
+        base = base.where(AuditLog.action == action)
+    if resource_type is not None:
+        base = base.where(AuditLog.resource_type == resource_type)
+
+    total = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = (
+        (
+            await session.execute(
+                base.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    _ = current_user
+    return AuditLogPage(
+        items=[_serialize_audit_log(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/audit/export")

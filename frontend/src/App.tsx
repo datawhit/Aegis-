@@ -5,6 +5,9 @@ import LoginPage from "@/pages/LoginPage";
 import IncidentsListPage from "@/pages/IncidentsListPage";
 import IncidentDetailPage from "@/pages/IncidentDetailPage";
 import ApprovalInboxPage from "@/pages/ApprovalInboxPage";
+import PoliciesListPage from "@/pages/PoliciesListPage";
+import PolicyDetailPage from "@/pages/PolicyDetailPage";
+import AuditLogsPage from "@/pages/AuditLogsPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -26,6 +29,9 @@ export default function App() {
         <Route path="/incidents" element={<IncidentsListPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/approvals" element={<ApprovalInboxPage />} />
+        <Route path="/policies" element={<PoliciesListPage />} />
+        <Route path="/policies/:id" element={<PolicyDetailPage />} />
+        <Route path="/audit-logs" element={<AuditLogsPage />} />
         <Route index element={<Navigate to="/incidents" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/incidents" replace />} />
