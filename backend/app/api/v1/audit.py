@@ -92,10 +92,10 @@ async def export_audit(
         private_key = None
         signing_available = False
 
-    # Record the export request on the chain. This audit entry will land
-    # AFTER snapshot_until, so it's not in this export — but it IS in
-    # any future export, which is the point.
-    await get_audit_logger().record(
+    # Record the export request on the chain. This audit entry should NOT
+    # appear in this export — but it WILL appear in any future export,
+    # which is the point.
+    exported_entry = await get_audit_logger().record(
         session,
         actor=Actor.user(current_user.id, label=current_user.email),
         action="audit.exported",
@@ -111,7 +111,17 @@ async def export_audit(
     )
     await session.commit()
 
-    stmt = select(AuditLog).order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+    # Filter by ID, not created_at: Postgres `now()` only ticks at
+    # statement-start granularity, so the exported_entry could share a
+    # timestamp with the prior tip. An `<= snapshot_until` predicate would
+    # then include it (the very entry we just wrote) in this export, which
+    # would be a circular self-reference.
+    exported_entry_id = exported_entry.id
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.id != exported_entry_id)
+        .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+    )
     if since is not None:
         stmt = stmt.where(AuditLog.created_at >= since)
     if snapshot_until is not None:

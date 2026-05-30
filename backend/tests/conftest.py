@@ -22,10 +22,12 @@ from collections.abc import AsyncIterator
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db import engine, get_session
 from app.main import app
+from app.models import Base
 
 
 @pytest_asyncio.fixture
@@ -46,6 +48,14 @@ async def db_session() -> AsyncIterator[AsyncSession]:
     await engine.dispose()
     connection = await engine.connect()
     transaction = await connection.begin()
+
+    # Belt-and-braces isolation: TRUNCATE every table at fixture setup so
+    # any data that leaked from a prior test (e.g. a session.commit() in
+    # a path we didn't anticipate) starts fresh here. The TRUNCATE itself
+    # is part of the outer transaction; the final rollback below reverts
+    # it, so the next test's TRUNCATE will see and clear anything new.
+    table_names = ", ".join(t.name for t in reversed(Base.metadata.sorted_tables))
+    await connection.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE"))
     # join_transaction_mode="create_savepoint" makes each session-level
     # commit a SAVEPOINT release instead of committing the outer txn,
     # so the final rollback below always wipes test state cleanly even
