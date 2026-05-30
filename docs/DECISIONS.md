@@ -729,6 +729,51 @@
 
 ---
 
+## ADR-024 — Risk Analytics: on-the-fly trend, no chart library
+
+- **Date:** 2026-05-30 (Sprint 11)
+- **Status:** Accepted
+- **Context:** ADR-022's reframe elevated Risk Analytics to Pillar 3.
+  Sprint 11 needed to ship the page without:
+  (a) adding a persisted hourly-snapshot table the rest of the
+  product doesn't need yet, or
+  (b) bringing in a chart library when the requirement is one
+  line chart plus a dozen sparklines.
+- **Decision:**
+  - **Risk score history is computed on-the-fly.** For each bucket
+    boundary T in the requested window, the endpoint runs a single
+    `SELECT SUM(severity_weight) FROM incidents WHERE created_at <= T
+    AND (status NOT IN closed OR updated_at >= T)`. With ~30 buckets
+    per request that's 30 small reads — fine for our scale. When
+    traffic justifies it, switch to a periodic snapshot job writing
+    to a new `risk_snapshot_hourly` table (D-66).
+  - **No chart library.** Single inline-SVG `TrendChart` component
+    handles both the main chart and per-category sparklines via a
+    `variant` prop. Tailwind + `currentColor` provide all theming.
+    Bundle stays small; visual control is direct.
+  - **Risk categories piggyback on the existing
+    `action_class → category` mapping** used by the Actions Feed.
+    No new metadata, no schema change. New action classes land in
+    OTHER until someone updates the dict.
+- **Why on-the-fly works at this stage:**
+  - Incident volume is small (one severity sum per bucket fits a
+    single index scan).
+  - Operators won't reload the page faster than the refetch interval
+    (60s) so total load is bounded.
+  - Persisted snapshots add a write path the audit chain doesn't
+    cleanly own — keeping the trend a read-only projection of
+    incident state preserves the "audit chain is authority" invariant.
+- **Consequences:**
+  - + Zero schema change, zero new write path.
+  - + Trend chart and sparklines share one component (< 100 LOC).
+  - + Bundle size delta is single-digit KB.
+  - – Larger incident volume will eventually make the bucketed sum
+    expensive. D-66 tracks the snapshot table for that day.
+  - – Risk score formula remains a starter heuristic (D-52 — same
+    open debt as the overview risk scalar).
+
+---
+
 ## ADR template (for future ADRs)
 
 ```

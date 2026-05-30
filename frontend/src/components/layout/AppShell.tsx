@@ -68,7 +68,7 @@ export function AppShell() {
     {
       label: "Risk Intelligence",
       items: [
-        { to: "/risk-analytics", label: "Risk Analytics", icon: "•", comingSoon: true },
+        { to: "/risk-analytics", label: "Risk Analytics", icon: "•" },
         { to: "/risk-explorer", label: "Risk Explorer", icon: "•", comingSoon: true },
       ],
     },

@@ -283,9 +283,9 @@ function RiskSnapshotCard({
       </div>
       <Link
         to="/risk-analytics"
-        className="mt-auto pt-4 font-mono text-[10px] uppercase tracking-widest text-aegis-muted hover:text-aegis-accent"
+        className="mt-auto pt-4 font-mono text-[10px] uppercase tracking-widest text-aegis-accent hover:underline"
       >
-        Risk Analytics arrives in Sprint 11 →
+        Open Risk Analytics →
       </Link>
     </div>
   );

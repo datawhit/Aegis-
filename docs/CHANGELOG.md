@@ -3046,3 +3046,230 @@ Assistant is its narrator." But buyers may ask whether a future
 ---
 
 > End of Sprint 10. Next entry: **Sprint 11 — Risk Analytics + Decision Record depth.**
+
+---
+
+## SPRINT 11 — RISK ANALYTICS
+
+- **DATE:** 2026-05-30
+- **STATUS:** Delivered. Awaiting review before Sprint 12 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Land Pillar 3 from ADR-022's operator-first reframe: the
+differentiating "what risk did Aegis reduce, in which categories,
+driven by which policies?" surface. Sprint 11 keeps discipline —
+ships Risk Analytics in full, defers Decision Record tabs and
+Assistant streaming to Sprint 12.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **`GET /api/v1/risk/analytics?window=24h|7d|30d`** —
+  aggregating endpoint returning four panels of data:
+  - `summary`: current + prior risk scalar + % delta + label.
+  - `score_history`: time-bucketed risk score samples
+    (24h → 2h buckets, 7d → 12h, 30d → 1 day). Computed
+    on-the-fly from incident state at each bucket boundary
+    (ADR-024). No schema change.
+  - `categories`: per-category action counts (current vs prior
+    window) + a tiny per-row sparkline. Categories derive from
+    the action_class → category mapping the Actions Feed already
+    uses (Identity, Endpoint, Network, Notification, Other).
+  - `top_reducing`: top 5 policies by EXECUTED-action count in
+    the window, with summed-severity "est_risk_reduced" — backed
+    by the `policy.evaluated` audit-chain payload's
+    `winning_policy_id`.
+- **`/risk-analytics` page** (replaces the Sprint-9 "soon"
+  placeholder). Window selector, summary card, trend chart, two
+  side-by-side panels.
+- **`<TrendChart>` component** — inline SVG, no chart library. One
+  implementation handles both the main chart and the per-category
+  sparklines via a `variant` prop. Uses `currentColor` for tone so
+  the surrounding Tailwind context picks the colour.
+- **Sidebar promotion** — Risk Analytics drops the "soon" badge
+  and becomes a real link. Risk Explorer stays "soon" (Sprint 12+).
+- **Overview Risk Snapshot card** now links into the analytics
+  page with "Open Risk Analytics →" instead of the prior "lands in
+  Sprint 11" placeholder.
+- **Tests**: 7 cases — window-bound math, score-at-time arithmetic
+  (open weighted vs closed excluded), HTTP smoke, top-reducing
+  picks up a real policy.evaluated audit entry.
+
+Explicitly out of scope:
+
+- Persisted hourly snapshots — see D-66; on-the-fly computation
+  is fine at current scale (ADR-024 documents the breakpoint).
+- Decision Record tabs (carry-over to Sprint 12).
+- Assistant streaming + server-side history (D-59 / D-60 — Sprint
+  12).
+- KMS adapter (D-37 — still waiting on Q32: AWS KMS vs Vault).
+- Risk Explorer page (deeper drill-down by category / asset —
+  Sprint 12+).
+
+### SECURITY CONSIDERATIONS
+
+- **Endpoint is read-only.** Same `CurrentUserDep` gate as the
+  other operator surfaces; no role-specific tightening because the
+  data is the same view operators already see in the Overview.
+- **No new data exposure.** The trend reads existing
+  `incidents`/`audit_logs`/`remediation_actions`. No PII surfaces.
+- **No new write path.** ADR-024 explicitly avoids adding one for
+  this sprint.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-024** Risk Analytics: on-the-fly trend, no chart library
+
+### FEATURES IMPLEMENTED
+
+| Feature                                          | Status | Notes                                              |
+| ------------------------------------------------ | ------ | -------------------------------------------------- |
+| `GET /api/v1/risk/analytics`                      | ✅     | 24h / 7d / 30d windows                              |
+| Risk score history (on-the-fly buckets)           | ✅     | Bucket size scales with window                      |
+| Risk categories with deltas + sparklines           | ✅     | 5 categories via action_class mapping               |
+| Top reducing policies                              | ✅     | Joins on policy.evaluated audit + summed severity   |
+| Frontend `RiskAnalyticsPage`                       | ✅     | Window selector, summary, trend, categories, reducing |
+| Inline SVG `TrendChart` (full + sparkline)          | ✅     | Single component, two variants                     |
+| Sidebar promotes Risk Analytics out of "soon"     | ✅     |                                                    |
+| Overview Risk Snapshot links into the page        | ✅     |                                                    |
+| Tests: 7 cases (unit + HTTP smoke + top-reducing) | ✅     |                                                    |
+
+### FILES CREATED (4)
+
+- `backend/app/api/v1/risk.py`
+- `backend/tests/test_risk_analytics.py`
+- `frontend/src/lib/risk.ts`
+- `frontend/src/pages/RiskAnalyticsPage.tsx`
+- `frontend/src/components/risk/TrendChart.tsx`
+
+### FILES MODIFIED (notable)
+
+- `backend/app/api/v1/router.py` — wire `risk` router
+- `frontend/src/App.tsx` — new `/risk-analytics` route
+- `frontend/src/components/layout/AppShell.tsx` — Risk Analytics
+  promoted out of `comingSoon`
+- `frontend/src/pages/OverviewPage.tsx` — Risk Snapshot card now
+  has a real link target
+- `docs/DECISIONS.md` — ADR-024
+
+### DATABASE CHANGES
+
+**None.** Every new behavior reads existing tables.
+
+### API CHANGES
+
+| Method | Path                              | Auth    | Description                              |
+| ------ | --------------------------------- | ------- | ---------------------------------------- |
+| GET    | `/api/v1/risk/analytics?window=…` | bearer  | Summary + history + categories + top reducing |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                              | Owed-by Sprint |
+| ---- | ------------------------------------------------------------------------------------------------- | -------------- |
+| D-65 | Risk Analytics emits no metrics of its own (e.g. trend-fetch latency); add OTel histogram          | Sprint 12      |
+| D-66 | On-the-fly trend bucketing scales linearly with `incidents` row count × bucket count. Replace with a periodic snapshot job when traffic warrants. | Sprint 12+ |
+| D-67 | Risk-categories mapping is hard-coded in two places (actions_feed + risk). Move to a shared module. | Sprint 12 |
+| D-68 | "Risk Explorer" sidebar entry still says "soon" — Sprint 12+ candidate                              | Sprint 12+     |
+| D-69 | TrendChart has no axis labels; fine for the sparkline variant, debatable for the full chart        | Sprint 12      |
+| D-70 | `top_reducing.est_risk_reduced` double-counts incidents that fired multiple policy.evaluated entries (e.g. re-evaluations). Acceptable approximation today. | Sprint 12+ |
+
+(Open from prior sprints: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40, D-43, D-45, D-47–D-64.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-41 | On a large incidents table the 30d/1-day-bucket query becomes slow (30 × indexed SUM)                  | Medium     | Low      | D-66 snapshot job; for now a 60s refetch interval bounds load                    |
+| R-42 | Risk score formula gives "Critical" on a noisy DB that's mostly false positives                        | Medium     | Medium   | Same as D-52 — calibration is open                                               |
+| R-43 | Operators read the trend as ground truth; on-the-fly recalculation means historical scores shift when an old incident gets reclassified | Low | Low | Document explicitly in ADR-024; persisted snapshots make this immutable |
+
+### ROLLBACK STRATEGY
+
+- **Endpoint:** removing the include in `router.py` pulls it
+  offline. No data is migrated.
+- **Page:** removing the route in `App.tsx` reverts the surface;
+  the sidebar entry can re-acquire `comingSoon: true` for a
+  one-line revert.
+- **`TrendChart`:** reused only by the Risk Analytics page; safe to
+  remove with the page.
+- **Overview link:** changing the link target back to a "soon"
+  affordance is a one-line revert.
+
+### KNOWN LIMITATIONS
+
+1. **No persisted history.** Re-classifying an old incident
+   retroactively changes its contribution to the trend (R-43).
+2. **No metric on the endpoint itself.** Adding OTel histograms for
+   fetch latency lands in Sprint 12 (D-65).
+3. **Risk Explorer is still a stub.** Drill-down by category/asset
+   is Sprint 12+ territory (D-68).
+4. **Category mapping is duplicated** between `actions_feed.py`
+   and `risk.py` (D-67).
+
+### OBSERVABILITY (current state)
+
+- **Logs:** new endpoint flows through the existing FastAPI auto-
+  instrumentation — no bespoke logging.
+- **Metrics:** `/risk/analytics` shows up as another route in the
+  Sprint-7 dashboards. No custom counters yet (D-65).
+- **Traces:** auto-instrumented; the on-the-fly bucket loop appears
+  as N adjacent DB spans inside the request trace.
+
+### NEXT STEPS — Sprint 12 candidate scope
+
+Working title: **"Decision Record depth + Assistant streaming."**
+
+1. **Decision Record tabs** on Incident Detail (Overview / AI
+   Reasoning / Risk & Evidence / Related Alerts / Audit Trail) —
+   carry-over from Sprints 10 and 11.
+2. **Aegis Assistant: streaming + server-side conversation
+   history** (D-59 / D-60 / OQ-37 / OQ-38).
+3. **Assistant rate limit + per-user budget cap** (D-62 / OQ-39).
+4. **Risk Explorer** page (D-68) — per-category drill-down.
+5. **KMS adapter** (D-37) — Q32 finally decided.
+
+Carry-over backlog: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36,
+D-37, D-40, D-43, D-45, D-47–D-70.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                 | Needed by |
+| ----- | -------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-40 | Risk category taxonomy — five-bucket today (Identity / Endpoint / Network / Notification / Other) feels low. Add Cloud + Infrastructure proactively, or let customer feedback drive? | Sprint 12 |
+| OQ-41 | Persisted snapshots — hourly cron writing into a new table, or denormalise into the `audit_logs` chain as a special record type?                                       | Sprint 12+ |
+| OQ-42 | Trust + Risk score formulas — publish the math (Q40 reprise) before we calibrate, or after?                                                                            | Sprint 12 |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 11 closeout
+
+### 1. The Risk Reduction story as the buyer pitch
+
+Risk Analytics is now visible. The "Top Reducing Policies" panel
+is the most quantitative answer to "what is your AI buying me?" —
+specific rules tied to specific risk units removed.
+
+- **Q44.** Do we publish a quarterly *Risk Reduction Report* PDF
+  generated from this data? Mirrors the Sprint-4 signed-export
+  story but at the policy/category level for executives. It costs
+  ~1 sprint of report-renderer work but it's a high-leverage
+  artifact for renewals.
+
+### 2. Category mapping ownership
+
+Categories today are owned by Aegis (we picked Identity / Endpoint
+/ Network / Notification / Other). Customers may want their own
+taxonomy ("Crown Jewels", "Customer Data", "Internal Tooling").
+
+- **Q45.** Allow customer-owned category labels (one extra column on
+  policies + a UI mapping table), or hold the line on Aegis-defined
+  categories? Customer-owned is more flexible but creates a
+  per-tenant ontology debt.
+
+---
+
+> End of Sprint 11. Next entry: **Sprint 12 — Decision Record depth + Assistant streaming.**

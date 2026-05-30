@@ -9,6 +9,7 @@ import ApprovalInboxPage from "@/pages/ApprovalInboxPage";
 import PoliciesListPage from "@/pages/PoliciesListPage";
 import PolicyDetailPage from "@/pages/PolicyDetailPage";
 import AuditLogsPage from "@/pages/AuditLogsPage";
+import RiskAnalyticsPage from "@/pages/RiskAnalyticsPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/policies" element={<PoliciesListPage />} />
         <Route path="/policies/:id" element={<PolicyDetailPage />} />
         <Route path="/audit-logs" element={<AuditLogsPage />} />
+        <Route path="/risk-analytics" element={<RiskAnalyticsPage />} />
         <Route index element={<Navigate to="/overview" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/overview" replace />} />

@@ -16,6 +16,7 @@ from app.api.v1 import (
     overview,
     policies,
     remediations,
+    risk,
     slack,
 )
 
@@ -34,3 +35,5 @@ api_router.include_router(overview.router, tags=["overview"])
 api_router.include_router(actions_feed.router, tags=["actions"])
 # Sprint 10: Aegis Assistant chat.
 api_router.include_router(assistant.router, tags=["assistant"])
+# Sprint 11: Risk Analytics (Pillar 3).
+api_router.include_router(risk.router, tags=["risk"])
