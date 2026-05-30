@@ -124,6 +124,31 @@ class RiskAnalyticsResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Sprint 12: per-category drill-down (Risk Explorer page)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class CategoryActionRow(BaseModel):
+    action_id: str
+    action_class: str
+    incident_id: str
+    incident_title: str
+    incident_severity: str
+    outcome: str  # "resolved" | "stabilized" | "escalated"
+    ai_confidence: float | None
+    created_at: datetime
+
+
+class CategoryDrilldownResponse(BaseModel):
+    category: str
+    window: Window
+    summary: dict  # {actions_count, prior_count, delta_pct, est_risk_reduced}
+    trend: list[int]  # bucketed action counts
+    recent_actions: list[CategoryActionRow]
+    contributing_classes: list[dict]  # [{action_class, count}, ...]
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Endpoint
 # ─────────────────────────────────────────────────────────────────────
 
@@ -415,6 +440,152 @@ async def _top_reducing(
         )
         for pid, n, r in rows
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Sprint 12: per-category drill-down (/risk/category/{name})
+# ─────────────────────────────────────────────────────────────────────
+
+
+@router.get("/risk/category/{category}", response_model=CategoryDrilldownResponse)
+async def get_category_drilldown(
+    category: str,
+    session: SessionDep,
+    _user: CurrentUserDep,
+    window: Window = Query("7d"),
+) -> CategoryDrilldownResponse:
+    """Drill-down view for one risk category (Identity / Endpoint / etc).
+
+    Returns the actions, contributing action classes, and bucketed trend
+    scoped to the category over the requested window.
+    """
+    classes_in_category = [ac for ac, cat in _ACTION_CLASS_TO_CATEGORY.items() if cat == category]
+    now = datetime.now(UTC)
+    window_start, prior_start, bucket = _window_bounds(window, now)
+    sample_count = int((now - window_start) / bucket) + 1
+
+    if not classes_in_category:
+        return CategoryDrilldownResponse(
+            category=category,
+            window=window,
+            summary={
+                "actions_count": 0,
+                "prior_count": 0,
+                "delta_pct": None,
+                "est_risk_reduced": 0,
+            },
+            trend=[0] * sample_count,
+            recent_actions=[],
+            contributing_classes=[],
+        )
+
+    # All actions in current + prior window for this category.
+    stmt = (
+        select(RemediationAction, Incident)
+        .join(Incident, Incident.id == RemediationAction.incident_id)
+        .where(
+            RemediationAction.action_class.in_(classes_in_category),
+            RemediationAction.created_at >= prior_start,
+            RemediationAction.status.in_(
+                [
+                    RemediationStatus.EXECUTED.value,
+                    RemediationStatus.POLICY_ESCALATED.value,
+                ]
+            ),
+        )
+        .order_by(RemediationAction.created_at.desc())
+    )
+    rows = (await session.execute(stmt)).all()
+
+    current_actions: list[tuple[RemediationAction, Incident]] = []
+    prior_actions_count = 0
+    contributing: dict[str, int] = {}
+    trend = [0] * sample_count
+    bucket_size = (now - window_start) / sample_count if sample_count else bucket
+
+    for action, incident in rows:
+        ac = (
+            action.action_class.value
+            if hasattr(action.action_class, "value")
+            else str(action.action_class)
+        )
+        if action.created_at < window_start:
+            prior_actions_count += 1
+            continue
+        current_actions.append((action, incident))
+        contributing[ac] = contributing.get(ac, 0) + 1
+        if bucket_size.total_seconds() > 0:
+            idx = int((action.created_at - window_start) / bucket_size)
+            idx = max(0, min(sample_count - 1, idx))
+            trend[idx] += 1
+
+    current_count = len(current_actions)
+    if prior_actions_count == 0:
+        delta_pct: float | None = None if current_count == 0 else 100.0
+    else:
+        delta_pct = round((current_count - prior_actions_count) / prior_actions_count * 100.0, 1)
+
+    # est_risk_reduced: sum of severity weights for the originating
+    # incidents of EXECUTED actions in this window.
+    est_risk_reduced = sum(
+        _SEVERITY_WEIGHT.get(
+            incident.severity.value if hasattr(incident.severity, "value") else "info",
+            0.0,
+        )
+        for action, incident in current_actions
+        if (action.status.value if hasattr(action.status, "value") else "")
+        == RemediationStatus.EXECUTED.value
+    )
+
+    recent = [
+        CategoryActionRow(
+            action_id=str(action.id),
+            action_class=(
+                action.action_class.value
+                if hasattr(action.action_class, "value")
+                else str(action.action_class)
+            ),
+            incident_id=str(incident.id),
+            incident_title=incident.title,
+            incident_severity=(
+                incident.severity.value
+                if hasattr(incident.severity, "value")
+                else str(incident.severity)
+            ),
+            outcome=_outcome_for(action),
+            ai_confidence=action.ai_confidence,
+            created_at=action.created_at,
+        )
+        for action, incident in current_actions[:25]
+    ]
+
+    contributing_list = [
+        {"action_class": ac, "count": n}
+        for ac, n in sorted(contributing.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+    return CategoryDrilldownResponse(
+        category=category,
+        window=window,
+        summary={
+            "actions_count": current_count,
+            "prior_count": prior_actions_count,
+            "delta_pct": delta_pct,
+            "est_risk_reduced": int(round(est_risk_reduced)),
+        },
+        trend=trend,
+        recent_actions=recent,
+        contributing_classes=contributing_list,
+    )
+
+
+def _outcome_for(action: RemediationAction) -> str:
+    status = action.status.value if hasattr(action.status, "value") else str(action.status)
+    if status == RemediationStatus.POLICY_ESCALATED.value:
+        return "escalated"
+    if status == RemediationStatus.EXECUTED.value:
+        return "stabilized" if action.action_class.is_stabilization else "resolved"
+    return status
 
 
 # Silence "imported but unused" — RemediationActionClass is referenced

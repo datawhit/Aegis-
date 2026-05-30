@@ -3273,3 +3273,223 @@ taxonomy ("Crown Jewels", "Customer Data", "Internal Tooling").
 ---
 
 > End of Sprint 11. Next entry: **Sprint 12 — Decision Record depth + Assistant streaming.**
+
+---
+
+## SPRINT 12 — DECISION RECORD DEPTH + RISK EXPLORER
+
+- **DATE:** 2026-05-30
+- **STATUS:** Delivered. Awaiting review before Sprint 13 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Add depth to two surfaces shipped in the prior two sprints:
+
+1. The **Aegis Decision Record** (Sprint 09) gets the five-tab layout
+   from the mockup — same data, now navigable.
+2. **Risk Analytics** (Sprint 11) gets a sibling drill-down page —
+   Risk Explorer — where an operator can pick one category and see
+   the actions, contributing classes, and trend scoped to that
+   category alone.
+
+Assistant streaming + server-side history (originally also planned
+for Sprint 12) are bumped to Sprint 13. Two visible polish wins is
+the right scope.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **`GET /api/v1/risk/category/{name}?window=…`** — per-category
+  drill-down. Returns `summary` (actions_count, prior_count, delta,
+  est_risk_reduced) + `trend` (bucketed action counts scoped to the
+  category) + up to 25 `recent_actions` + `contributing_classes`
+  (which action_classes drove the volume). Filters by the same
+  category mapping `risk.py` and `actions_feed.py` use.
+- **`RiskExplorerPage`** (`/risk-explorer`) replaces the Sprint-9
+  "soon" placeholder. Categories list on the left (driven by the
+  analytics rollup), category detail on the right, window selector
+  shared with Risk Analytics.
+- **Decision Record tabs** on `IncidentDetailPage`:
+  - `Overview` — AI Decision Summary + Recommended Actions
+  - `AI Reasoning` — existing AIReasoningPanel
+  - `Risk & Evidence` — new tab with risk signals (AI confidence,
+    total blast radius, MITRE techniques) and a "Why Aegis Could
+    Act" checklist (confidence vs autonomy threshold, rollback
+    plan coverage, blast radius vs policy bounds)
+  - `Related Alerts` — existing source-alerts list
+  - `Audit Trail` — deep-link into the audit-chain explorer
+    pre-filtered by this incident
+- **Sidebar promotes Risk Explorer** out of "soon".
+- **Tests**: 3 new HTTP cases for the category endpoint
+  (known/unknown category, outcome labels).
+
+Explicitly out of scope:
+
+- Assistant streaming (D-60) — Sprint 13.
+- Assistant server-side conversation history (D-59 / D-64) —
+  Sprint 13.
+- Assistant rate limit (D-62) — Sprint 13.
+- KMS adapter (D-37) — Sprint 13+, Q32 still open.
+- Real `/audit-logs` query-string filter parsing (the Audit Trail
+  tab links with `?resource_type=incident&resource_id=…` but the
+  explorer doesn't yet read those params — Sprint 13 polish).
+
+### SECURITY CONSIDERATIONS
+
+- **Category endpoint is read-only** with the same `CurrentUserDep`
+  gate as the other operator surfaces.
+- **Path parameter is bounded** to known categories via the
+  hard-coded mapping. Unknown values return an empty-shape response
+  rather than 404 — keeps the UI from white-screening when a
+  category disappears mid-render.
+- **Decision Record tabs surface no new data** — they reorganise
+  what the existing `/incidents/{id}` response already returned.
+
+### ARCHITECTURAL DECISIONS
+
+No new ADRs — both features build on the patterns from ADR-022
+(operator-first) and ADR-024 (on-the-fly risk aggregation).
+
+### FEATURES IMPLEMENTED
+
+| Feature                                          | Status | Notes                                              |
+| ------------------------------------------------ | ------ | -------------------------------------------------- |
+| `GET /api/v1/risk/category/{name}`                | ✅     | Window selector, recent actions, contributing classes |
+| Risk Explorer page                                | ✅     | Replaces the Sprint-9 "soon" placeholder            |
+| Risk Explorer category list (left rail)           | ✅     | Driven by the analytics rollup                      |
+| Risk Explorer category detail (right)              | ✅     | Summary + trend + recent + contributing classes     |
+| Sidebar promotes Risk Explorer out of "soon"      | ✅     |                                                    |
+| Decision Record: 5-tab layout                     | ✅     | Overview / AI Reasoning / Risk & Evidence / Alerts / Audit |
+| Risk & Evidence tab — "Why Aegis Could Act"       | ✅     | Confidence vs threshold, rollback coverage, blast vs policy |
+| Audit Trail tab — deep link with resource filters | ✅     |                                                    |
+| Tests: 3 HTTP cases for the category endpoint     | ✅     |                                                    |
+
+### FILES CREATED (3)
+
+- `backend/tests/test_risk_category.py`
+- `frontend/src/pages/RiskExplorerPage.tsx`
+
+### FILES MODIFIED (notable)
+
+- `backend/app/api/v1/risk.py` — `CategoryDrilldownResponse` shape +
+  `GET /risk/category/{category}` handler + small `_outcome_for`
+  helper local to risk
+- `frontend/src/lib/risk.ts` — `getRiskCategory` + types
+- `frontend/src/App.tsx` — `/risk-explorer` route
+- `frontend/src/components/layout/AppShell.tsx` — Risk Explorer
+  drops `comingSoon`
+- `frontend/src/pages/IncidentDetailPage.tsx` — full refactor of the
+  main column into a tabbed view; rail unchanged
+- `docs/CHANGELOG.md` — this entry
+
+### DATABASE CHANGES
+
+**None.** Both features aggregate existing tables.
+
+### API CHANGES
+
+| Method | Path                                    | Auth    | Description                                  |
+| ------ | --------------------------------------- | ------- | -------------------------------------------- |
+| GET    | `/api/v1/risk/category/{category}`      | bearer  | Drill-down summary + trend + actions + classes |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                              | Owed-by Sprint |
+| ---- | ------------------------------------------------------------------------------------------------- | -------------- |
+| D-71 | "Why Aegis Could Act" checklist thresholds (85% confidence, 5 blast radius) are hard-coded; should read from policy constraints | Sprint 13 |
+| D-72 | Audit Trail tab links with `?resource_type=…&resource_id=…` but `AuditLogsPage` ignores query params today; wire up | Sprint 13 |
+| D-73 | Risk Explorer first-render flashes "no activity" before the analytics query lands — small loading-state polish | Sprint 13 |
+| D-74 | Per-category trend uses the same bucket sizing as the rollup; long sparse windows produce many empty buckets | Sprint 13+ |
+
+(Open from prior sprints: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40, D-43, D-45, D-47–D-70.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-44 | Tabbed Decision Record loses operator's place when a route refresh resets the tab to "overview"        | Medium     | Low      | Encode tab in URL query string in Sprint 13 (`?tab=ai_reasoning`)                |
+| R-45 | Risk Explorer category list lags behind the analytics rollup if both queries are cached separately     | Low        | Low      | Both keys derive from the same window; React Query coalesces with reasonable defaults |
+
+### ROLLBACK STRATEGY
+
+- **Endpoint:** removing the new `@router.get("/risk/category/{category}")` is a one-line revert.
+- **Risk Explorer:** removing the route in `App.tsx` and re-marking the sidebar item as `comingSoon: true` reverts to the Sprint-11 surface.
+- **Decision Record tabs:** the previous stacked layout lives in git
+  history; restoring `IncidentDetailPage` from Sprint 9 is a clean
+  revert (no data was migrated).
+
+### KNOWN LIMITATIONS
+
+1. **Decision Record tab state is in-component only.** Refresh
+   drops you back to "Overview" (R-44).
+2. **Audit Trail tab's deep link doesn't yet pre-filter** the
+   audit-logs page — query params aren't read there (D-72).
+3. **"Why Aegis Could Act" thresholds are hard-coded** — they
+   should pull from policy constraints (D-71).
+4. **Risk Explorer initial render** can flash an empty state for
+   ~one frame before the analytics rollup arrives (D-73).
+
+### OBSERVABILITY (current state)
+
+- **Logs / metrics / traces:** the new endpoint is OTel
+  auto-instrumented like its siblings. No custom counters.
+- **Audit chain:** unchanged.
+
+### NEXT STEPS — Sprint 13 candidate scope
+
+Working title: **"Assistant streaming + server-side history."**
+
+1. **Server-side Assistant conversation history** (D-59 / D-64) —
+   new `assistant_conversations` + `assistant_messages` tables; the
+   chat endpoint becomes stateful per conversation_id.
+2. **Streaming responses** via SSE (D-60 / OQ-38) — collector +
+   Tempo already in place from Sprint 8.
+3. **Assistant rate limit + per-user budget cap** (D-62 / OQ-39).
+4. **Tab-state in URL query string** (R-44).
+5. **Audit-logs filter from query params** (D-72).
+6. **KMS adapter** (D-37) — Q32 needs a decision.
+
+Carry-over: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40,
+D-43, D-45, D-47–D-74.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-43 | Tab state in URL (deep-linkable) or in local component state (simpler)? Recommend URL.                  | Sprint 13 |
+| OQ-44 | "Why Aegis Could Act" — read thresholds from the matched policy at decision time, or compute on read?    | Sprint 13 |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 12 closeout
+
+### 1. The Decision Record as the demo close
+
+The five-tab Decision Record is now the visceral "show me a
+specific decision" artifact. Risk Analytics + Risk Explorer is the
+roll-up. The combination is the demo arc: overnight summary →
+trust score → one specific decision → category drill-down → audit
+trail.
+
+- **Q46.** Do we treat the Decision Record as the *primary* demo
+  destination — the page a sales meeting ends on — replacing the
+  audit export as the closer? Audit export reads compliance-officer;
+  Decision Record reads SOC manager. Pick by buyer persona (Q11).
+
+### 2. Risk Explorer adjacencies
+
+The Risk Explorer is the first page where operators can drill from
+roll-up to specifics. That pattern wants to extend to:
+"Top Reducing Policies" → click a policy → show actions it drove.
+
+- **Q47.** Sprint 13 candidate: add a `/policies/:id` view of the
+  policy's recent actions (parallel to the Risk Explorer drill-down).
+  Cheap to ship and completes the "every roll-up has a drill-down"
+  pattern.
+
+---
+
+> End of Sprint 12. Next entry: **Sprint 13 — Assistant streaming + server-side history.**

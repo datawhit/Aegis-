@@ -7,22 +7,32 @@ import { SeverityBadge } from "@/components/incidents/SeverityBadge";
 import { AIReasoningPanel } from "@/components/incidents/AIReasoningPanel";
 
 /**
- * Sprint 9: refresh the Incident Detail page into an Aegis Decision Record.
+ * Sprint 12: tabbed Decision Record.
  *
- * The structural change is intentional but conservative — the data flow,
- * AI reasoning panel, and rollback wiring all stay the same. The page
- * now reads:
+ * Same data flow as Sprint 9. The main column now lives inside a tab
+ * container with five tabs (matches the mockup):
  *
- *   [header — Aegis Decision Record + status]
- *   [two-col]
- *     · left:  AI Decision Summary + Why allowed + Remediations + Source alerts
- *     · right: Actions (rollback lives here) + Decision Attributes
+ *   - Overview        — AI Decision Summary + Recommended Actions
+ *   - AI Reasoning    — full reasoning panel (per-snapshot)
+ *   - Risk & Evidence — affected entities, blast radius, MITRE
+ *   - Related Alerts  — source alerts that fed this incident
+ *   - Audit Trail     — link into the audit-chain explorer scoped here
  *
- * Tabs and the rich timeline view land in Sprint 10 alongside the
- * Assistant work, per the operator-first reframe brief.
+ * The right rail (Actions panel + Decision Attributes) is unchanged.
  */
+
+type Tab = "overview" | "ai_reasoning" | "risk_evidence" | "related_alerts" | "audit";
+
+const TAB_LABELS: { id: Tab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "ai_reasoning", label: "AI Reasoning" },
+  { id: "risk_evidence", label: "Risk & Evidence" },
+  { id: "related_alerts", label: "Related Alerts" },
+  { id: "audit", label: "Audit Trail" },
+];
 export default function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [tab, setTab] = useState<Tab>("overview");
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["incident", id],
     queryFn: () => getIncident(id!),
@@ -87,63 +97,103 @@ export default function IncidentDetailPage() {
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-        {/* ─── Main column ─── */}
-        <div className="space-y-6">
-          {data.summary && (
-            <section className="rounded-lg border border-aegis-border bg-aegis-panel p-5">
-              <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-aegis-muted">
-                AI Decision Summary
-              </h2>
-              <p className="text-sm text-aegis-text">{data.summary}</p>
-            </section>
-          )}
+        {/* ─── Main column with tabs ─── */}
+        <div className="rounded-lg border border-aegis-border bg-aegis-panel">
+          <nav
+            role="tablist"
+            className="flex flex-wrap gap-1 border-b border-aegis-border px-4 pt-3"
+          >
+            {TAB_LABELS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`rounded-t border-b-2 px-3 py-2 font-mono text-xs uppercase tracking-widest ${
+                  tab === t.id
+                    ? "border-aegis-accent text-aegis-text"
+                    : "border-transparent text-aegis-muted hover:text-aegis-text"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
 
-          <section className="rounded-lg border border-aegis-border bg-aegis-panel p-5">
-            <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
-              AI Reasoning ({data.reasoning_snapshots.length})
-            </h2>
-            <AIReasoningPanel snapshots={data.reasoning_snapshots} />
-          </section>
-
-          <section className="rounded-lg border border-aegis-border bg-aegis-panel p-5">
-            <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
-              Recommended Actions ({data.remediation_actions.length})
-            </h2>
-            {data.remediation_actions.length === 0 ? (
-              <p className="text-sm text-aegis-muted">
-                None proposed — AI did not recommend an action.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {data.remediation_actions.map((r) => (
-                  <RemediationListItem
-                    key={r.id}
-                    remediation={r}
-                    incidentId={data.id}
-                  />
-                ))}
-              </ul>
+          <div className="space-y-4 p-5">
+            {tab === "overview" && (
+              <>
+                {data.summary && (
+                  <div>
+                    <h2 className="mb-2 font-mono text-xs uppercase tracking-widest text-aegis-muted">
+                      AI Decision Summary
+                    </h2>
+                    <p className="text-sm text-aegis-text">{data.summary}</p>
+                  </div>
+                )}
+                <div>
+                  <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
+                    Recommended Actions ({data.remediation_actions.length})
+                  </h2>
+                  {data.remediation_actions.length === 0 ? (
+                    <p className="text-sm text-aegis-muted">
+                      None proposed — AI did not recommend an action.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {data.remediation_actions.map((r) => (
+                        <RemediationListItem
+                          key={r.id}
+                          remediation={r}
+                          incidentId={data.id}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
             )}
-          </section>
 
-          <section className="rounded-lg border border-aegis-border bg-aegis-panel p-5">
-            <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
-              Source Alerts ({data.alerts.length})
-            </h2>
-            <ul className="space-y-2">
-              {data.alerts.map((a) => (
-                <li
-                  key={a.id}
-                  className="flex flex-wrap items-baseline gap-3 font-mono text-xs text-aegis-muted"
-                >
-                  <SeverityBadge severity={a.severity} />
-                  <span className="text-aegis-text">{a.source}</span>
-                  <span>{a.source_event_id}</span>
-                  <span>{new Date(a.created_at).toLocaleString()}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+            {tab === "ai_reasoning" && (
+              <div>
+                <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
+                  AI Reasoning ({data.reasoning_snapshots.length})
+                </h2>
+                <AIReasoningPanel snapshots={data.reasoning_snapshots} />
+              </div>
+            )}
+
+            {tab === "risk_evidence" && (
+              <RiskEvidenceTab
+                techniques={data.mitre_techniques}
+                remediations={data.remediation_actions}
+                aiConfidence={data.ai_confidence}
+              />
+            )}
+
+            {tab === "related_alerts" && (
+              <div>
+                <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
+                  Source Alerts ({data.alerts.length})
+                </h2>
+                <ul className="space-y-2">
+                  {data.alerts.map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex flex-wrap items-baseline gap-3 font-mono text-xs text-aegis-muted"
+                    >
+                      <SeverityBadge severity={a.severity} />
+                      <span className="text-aegis-text">{a.source}</span>
+                      <span>{a.source_event_id}</span>
+                      <span>{new Date(a.created_at).toLocaleString()}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {tab === "audit" && <AuditTab incidentId={data.id} />}
+          </div>
         </div>
 
         {/* ─── Right rail: Actions + Attributes ─── */}
@@ -367,5 +417,121 @@ function RemediationListItem({
         </div>
       )}
     </li>
+  );
+}
+
+/* ─── Tab: Risk & Evidence ──────────────────────────────────── */
+
+function RiskEvidenceTab({
+  techniques,
+  remediations,
+  aiConfidence,
+}: {
+  techniques: string[];
+  remediations: RemediationItem[];
+  aiConfidence: number | null;
+}) {
+  const totalBlast = remediations.reduce((acc, r) => acc + (r.blast_radius || 0), 0);
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
+          Risk Signals
+        </h2>
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Metric label="AI Confidence" value={
+            aiConfidence === null ? "—" : `${Math.round(aiConfidence * 100)}%`
+          } />
+          <Metric label="Total Blast Radius" value={totalBlast.toString()} />
+          <Metric
+            label="MITRE Techniques"
+            value={techniques.length === 0 ? "—" : techniques.join(", ")}
+          />
+        </dl>
+      </div>
+
+      <div>
+        <h2 className="mb-3 font-mono text-xs uppercase tracking-widest text-aegis-muted">
+          Why Aegis Could Act
+        </h2>
+        <ul className="space-y-2 text-sm text-aegis-text">
+          {(aiConfidence ?? 0) >= 0.85 ? (
+            <li>
+              <Check /> AI confidence ({Math.round((aiConfidence ?? 0) * 100)}%) exceeds
+              autonomy threshold (85%).
+            </li>
+          ) : (
+            <li>
+              <Cross /> AI confidence below 85% — outside Aegis's autonomy window.
+            </li>
+          )}
+          {remediations.every((r) => r.rollback_plan) ? (
+            <li>
+              <Check /> Every proposed action carries a rollback plan.
+            </li>
+          ) : (
+            <li>
+              <Cross /> One or more actions lack a rollback plan; Aegis cannot act
+              autonomously on them.
+            </li>
+          )}
+          {totalBlast <= 5 ? (
+            <li>
+              <Check /> Total blast radius ({totalBlast}) is within policy bounds.
+            </li>
+          ) : (
+            <li>
+              <Cross /> Total blast radius ({totalBlast}) exceeds the standard policy
+              cap of 5.
+            </li>
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border border-aegis-border bg-aegis-bg p-3">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-aegis-muted">
+        {label}
+      </div>
+      <div className="mt-1 text-sm text-aegis-text">{value}</div>
+    </div>
+  );
+}
+
+function Check() {
+  return <span className="mr-2 text-aegis-ok">✓</span>;
+}
+
+function Cross() {
+  return <span className="mr-2 text-aegis-danger">✗</span>;
+}
+
+/* ─── Tab: Audit Trail (deep-link into the explorer) ─────────── */
+
+function AuditTab({ incidentId }: { incidentId: string }) {
+  return (
+    <div className="space-y-3">
+      <h2 className="font-mono text-xs uppercase tracking-widest text-aegis-muted">
+        Audit Trail
+      </h2>
+      <p className="text-sm text-aegis-muted">
+        Aegis writes every decision affecting this incident to the hash-chained
+        audit log. View the full trail in the dedicated explorer.
+      </p>
+      <div className="rounded border border-aegis-border bg-aegis-bg p-3 font-mono text-xs text-aegis-muted">
+        <div>resource_type: <span className="text-aegis-accent">incident</span></div>
+        <div>resource_id: <span className="text-aegis-accent">{incidentId}</span></div>
+      </div>
+      <Link
+        to={`/audit-logs?resource_type=incident&resource_id=${incidentId}`}
+        className="inline-block rounded border border-aegis-accent px-3 py-1.5 font-mono text-xs text-aegis-accent hover:bg-aegis-accent hover:text-aegis-bg"
+      >
+        Open in Audit Trail explorer →
+      </Link>
+    </div>
   );
 }

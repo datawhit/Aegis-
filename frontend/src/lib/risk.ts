@@ -43,3 +43,41 @@ export async function getRiskAnalytics(
   });
   return data;
 }
+
+// ── Sprint 12: per-category drill-down ──────────────────────────────
+
+export type CategoryActionRow = {
+  action_id: string;
+  action_class: string;
+  incident_id: string;
+  incident_title: string;
+  incident_severity: "info" | "low" | "medium" | "high" | "critical";
+  outcome: "resolved" | "stabilized" | "escalated";
+  ai_confidence: number | null;
+  created_at: string;
+};
+
+export type CategoryDrilldownResponse = {
+  category: string;
+  window: RiskWindow;
+  summary: {
+    actions_count: number;
+    prior_count: number;
+    delta_pct: number | null;
+    est_risk_reduced: number;
+  };
+  trend: number[];
+  recent_actions: CategoryActionRow[];
+  contributing_classes: { action_class: string; count: number }[];
+};
+
+export async function getRiskCategory(
+  category: string,
+  window: RiskWindow = "7d",
+): Promise<CategoryDrilldownResponse> {
+  const { data } = await api.get<CategoryDrilldownResponse>(
+    `/risk/category/${encodeURIComponent(category)}`,
+    { params: { window } },
+  );
+  return data;
+}
