@@ -205,7 +205,14 @@ async def _score_history(
 
 async def _score_at(session: AsyncSession, t: datetime) -> int:
     """Risk score that *would* have been reported at moment t."""
-    severity_weight = case(_SEVERITY_WEIGHT, value=Incident.severity, else_=0.0)
+    # Use the explicit-tuple form of `case` (each WHEN is a condition).
+    # The `case(dict, value=col)` shorthand has been observed to compile
+    # to a different match path under some SQLAlchemy/asyncpg combos —
+    # explicit conditions are unambiguous.
+    severity_weight = case(
+        *[(Incident.severity == sev, weight) for sev, weight in _SEVERITY_WEIGHT.items()],
+        else_=0.0,
+    )
     # An incident counts toward risk at time t if it was created at or
     # before t AND not closed/resolved by t (updated_at ≥ t OR currently
     # still open). The second clause keeps still-open incidents in scope
@@ -349,7 +356,15 @@ async def _top_reducing(
             winning_id_expr.label("policy_id"),
             func.count(RemediationAction.id).label("actions_count"),
             func.coalesce(
-                func.sum(case(_SEVERITY_WEIGHT, value=Incident.severity, else_=0.0)),
+                func.sum(
+                    case(
+                        *[
+                            (Incident.severity == sev, weight)
+                            for sev, weight in _SEVERITY_WEIGHT.items()
+                        ],
+                        else_=0.0,
+                    )
+                ),
                 0.0,
             ).label("est_risk_reduced"),
         )

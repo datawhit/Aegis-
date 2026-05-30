@@ -316,8 +316,11 @@ async def _risk_snapshot(
         IncidentStatus.ESCALATED.value,
     ]
 
+    # Explicit-tuple form (see app/api/v1/risk.py for rationale).
+    _weights = {"critical": 12, "high": 5, "medium": 2, "low": 0.5}
     severity_weight = case(
-        {"critical": 12, "high": 5, "medium": 2, "low": 0.5}, value=Incident.severity
+        *[(Incident.severity == sev, w) for sev, w in _weights.items()],
+        else_=0,
     )
     stmt_now = select(func.coalesce(func.sum(severity_weight), 0.0)).where(
         Incident.status.in_(open_states)

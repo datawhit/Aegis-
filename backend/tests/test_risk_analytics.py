@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,7 +94,10 @@ async def test_score_at_counts_open_incidents_weighted(
         )
     )
     await db_session.flush()
-    score = await _score_at(db_session, datetime.now(UTC))
+    # Use a `t` solidly in the future so we don't race with the
+    # transaction's `now()` (Incident.created_at is server-set).
+    t = datetime.now(UTC) + timedelta(seconds=60)
+    score = await _score_at(db_session, t)
     # 5 (HIGH) + 12 (CRITICAL) = 17
     assert score == 17
 
