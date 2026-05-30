@@ -39,9 +39,15 @@ class AuditLog(Base, UUIDPKMixin):
     __tablename__ = "audit_logs"
 
     # Server-side timestamp — clients cannot reorder history.
+    # `clock_timestamp()`, not `now()`: NOW() is transaction-scoped, so
+    # multiple audit entries written inside one transaction would share a
+    # created_at, breaking the (created_at, id) ordering the writer uses to
+    # find the chain tip and the verifier uses to walk. clock_timestamp()
+    # returns the wall clock at the moment of the call, giving microsecond
+    # uniqueness per insert.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
+        server_default=func.clock_timestamp(),
         nullable=False,
     )
 
