@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { AppShell } from "@/components/layout/AppShell";
 import LoginPage from "@/pages/LoginPage";
+import OverviewPage from "@/pages/OverviewPage";
 import IncidentsListPage from "@/pages/IncidentsListPage";
 import IncidentDetailPage from "@/pages/IncidentDetailPage";
 import ApprovalInboxPage from "@/pages/ApprovalInboxPage";
@@ -26,15 +27,16 @@ export default function App() {
           </ProtectedRoute>
         }
       >
+        <Route path="/overview" element={<OverviewPage />} />
         <Route path="/incidents" element={<IncidentsListPage />} />
         <Route path="/incidents/:id" element={<IncidentDetailPage />} />
         <Route path="/approvals" element={<ApprovalInboxPage />} />
         <Route path="/policies" element={<PoliciesListPage />} />
         <Route path="/policies/:id" element={<PolicyDetailPage />} />
         <Route path="/audit-logs" element={<AuditLogsPage />} />
-        <Route index element={<Navigate to="/incidents" replace />} />
+        <Route index element={<Navigate to="/overview" replace />} />
       </Route>
-      <Route path="*" element={<Navigate to="/incidents" replace />} />
+      <Route path="*" element={<Navigate to="/overview" replace />} />
     </Routes>
   );
 }

@@ -603,6 +603,74 @@
 
 ---
 
+## ADR-022 — Operator-first UX reframe (the AI Security Operator narrative)
+
+- **Date:** 2026-05-29 (Sprint 09)
+- **Status:** Accepted; reframes the UX hierarchy without changing any
+  backend service, model, or contract from Sprints 0–8.
+- **Context:** Sprints 1–8 built incident-centric UX on top of an
+  AI-driven backend. Product feedback was unambiguous: the platform
+  IS an autonomous security operator with governance, not a SOC
+  dashboard with AI features. The order of those two framings is the
+  product, and the UI had it backwards.
+- **Decision:** Reframe the experience layer around four pillars
+  (Operations, Governance, Risk Intelligence, Decision Intelligence)
+  with the question "what did Aegis do for me?" answered before
+  "what incidents exist?". Concretely in Sprint 9:
+  - New default landing route `/overview` whose primary panel is the
+    **Aegis Actions Feed** (centerpiece, tabbed by outcome:
+    resolved / stabilized / escalated). Incident queue demoted to a
+    secondary nav entry but unchanged.
+  - Left-sidebar `AppShell` grouped by pillar; the old top nav is
+    kept only for the lg-and-below breakpoint.
+  - Personalized greeting ("here's what Aegis accomplished") +
+    overnight summary KPIs.
+  - Aegis Trust Score elevated as a first-class panel.
+  - Aegis Assistant placeholder (BETA) — input + suggested queries
+    only; chat backend is Sprint 10.
+  - Incident detail refactored as an Aegis Decision Record (header
+    reads "Aegis Decision Record"; actions live in a right rail; no
+    queue-ticket framing).
+- **What we explicitly are NOT doing:**
+  - No backend deletion, no model change, no API rewrite. The
+    operator-first lens is built on top of existing
+    `Incident` / `RemediationAction` / `Approval` / `Policy` /
+    `AuditLog` tables.
+  - Two small new read endpoints (`/api/v1/overview` and
+    `/api/v1/actions/feed`) that aggregate existing data — no new
+    persistent state.
+  - No starting over: existing pages (Incidents list, Approvals,
+    Policies, Audit Trail) stay accessible from the sidebar.
+- **Why pillars-as-nav rather than feature-as-nav:**
+  - Mirrors the way an operator thinks ("show me operations" →
+    actions/queue; "show me governance" → policies/audit).
+  - Leaves a natural home for upcoming pillars: Risk Analytics
+    (Sprint 11), Decision Intelligence (Sprint 12).
+- **Stagger plan documented up front** so the operator-first lens
+  isn't a single big-bang sprint:
+  - Sprint 09 — this sprint: Overview + actions feed + sidebar +
+    decision record refresh + Assistant shell.
+  - Sprint 10 — Aegis Assistant chat backend (RAG over audit
+    chain + policies); richer Decision Record tabs.
+  - Sprint 11 — Risk Analytics page + risk trend charts +
+    categorised risk reduction.
+  - Sprint 12 — Decision Intelligence (recommendations,
+    what-if, policy optimisation).
+- **Consequences:**
+  - + The product story now matches the product. "AI security
+    operator + governance platform," not "security platform +
+    AI features."
+  - + Aegis Actions Feed becomes the data primitive everything
+    else hangs off — analytics, exports, assistant context.
+  - – Until Sprints 10–12 land, three sidebar entries
+    (Risk Analytics, Risk Explorer, System Status) show a
+    "soon" affordance and are non-interactive. Acceptable price for
+    making the IA visible early.
+  - – Trust-score and risk-score formulas are starter heuristics
+    (D-52). Real calibration needs customer data — explicit follow-up.
+
+---
+
 ## ADR template (for future ADRs)
 
 ```

@@ -2496,3 +2496,279 @@ tenant has a different definition of "5xx burst" than a small SaaS).
 ---
 
 > End of Sprint 08. Next entry: **Sprint 09 — KMS-backed signing + production hardening.**
+> (Superseded mid-sprint by an explicit product-direction update — see Sprint 09 below.)
+
+---
+
+## SPRINT 09 — OPERATOR-FIRST UX REFRAME
+
+- **DATE:** 2026-05-29
+- **STATUS:** Delivered. Awaiting review before Sprint 10 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Reframe the experience layer from incident-first to operator-first
+without touching the backend that Sprints 0–8 built. Product
+direction landed mid-sprint: the platform IS an autonomous security
+operator with governance, not a SOC dashboard with AI features.
+The order of those two framings is the product, and the UI had it
+backwards.
+
+Sprint 09 is the FIRST of a four-sprint staged reframe (see ADR-022):
+
+- Sprint 09 (this): Overview landing + Aegis Actions Feed + sidebar
+  shell + Decision Record detail + Assistant shell.
+- Sprint 10: Aegis Assistant chat backend.
+- Sprint 11: Risk Analytics page + risk trends.
+- Sprint 12: Decision Intelligence (recommendations, what-if).
+
+The KMS-backed-signing scope originally proposed for Sprint 9 in the
+Sprint 8 closeout is deferred — the product framing was the higher
+leverage problem to solve first.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **`GET /api/v1/overview`** — single aggregating endpoint that
+  returns:
+  - `overnight_summary`: issues evaluated, resolved autonomously,
+    stabilized, escalated, analyst hours saved (placeholder
+    formula), mean response time, % delta vs prior 24h window.
+  - `trust_score`: 0–100 score + label, plus rollbacks 24h, policy
+    adherence % 7d, rollback rate % 30d.
+  - `risk_snapshot`: 0–100 score + label, % delta vs prior 24h
+    window. Single scalar today; trend chart in Sprint 11.
+  - `requires_attention`: critical escalations, pending reviews,
+    stabilized systems counts.
+  - `top_policies_24h`: top 5 policies by `policy.evaluated` audit
+    entries in the last 24h, with empty-history fallback.
+- **`GET /api/v1/actions/feed`** — paginated, tabbed by outcome
+  (`all` | `resolved` | `stabilized` | `escalated`). Joins
+  `RemediationAction` + `Incident`; collapses the internal state
+  machine into operator-facing buckets (stabilization = containment
+  classes like `isolate_host` / `revoke_user_sessions`).
+- **Left-sidebar `AppShell`** grouped by pillars: Operations,
+  Governance, Risk Intelligence, Settings. Old top nav kept for
+  lg-and-below breakpoint. Three sidebar entries (Risk Analytics,
+  Risk Explorer, System Status) carry a "soon" affordance.
+- **`OverviewPage`** as new default route. Hierarchy:
+  1. Personalised greeting ("here's what Aegis accomplished")
+  2. Overnight summary KPI strip (6 tiles)
+  3. Trust Score panel + Risk Snapshot card
+  4. **Aegis Actions Feed — centerpiece, tabbed**
+  5. Top Active Policies (sidebar)
+  6. Requires Your Attention row (3 cards)
+  7. Aegis Assistant shell (BETA — input + suggested queries; chat
+     backend Sprint 10)
+- **Incident Detail refactor → Aegis Decision Record.** Header now
+  reads "Aegis Decision Record"; two-column layout with main content
+  on the left and an Actions + Decision Attributes rail on the
+  right. Rollback flow moves into the Actions rail. Source alerts +
+  remediations + AI reasoning kept verbatim.
+- Default route: `/` → `/overview` (was `/incidents`).
+
+Explicitly out of scope:
+
+- Aegis Assistant chat backend (Sprint 10).
+- Tabbed Decision Record (Overview / AI Reasoning / Risk &
+  Evidence / Related Alerts / Audit Trail) — Sprint 10 polish.
+- Risk Analytics deep view + trend chart + categorised risk
+  reduction — Sprint 11.
+- Decision Intelligence (recommendations) — Sprint 12.
+- KMS adapter (D-37) — re-scheduled; the operator-first reframe
+  was higher leverage.
+- Real trust-score and risk-score formulas — current implementations
+  are starter heuristics, tracked as D-52.
+
+### SECURITY CONSIDERATIONS
+
+- **No new auth surface.** Both new endpoints require a bearer token
+  (existing `CurrentUserDep`). No data is exposed that the user
+  couldn't already see via the existing per-resource endpoints.
+- **Aggregation queries are read-only.** `/overview` runs five small
+  selects per request; no writes. `/actions/feed` is a paginated
+  join with `limit * 4` over-fetch to absorb in-Python outcome
+  filtering — capped so worst-case is 800 rows.
+- **Trust score and risk score are advisory, not authority.** They
+  drive UI affordances only; no policy decision reads from them.
+- **Assistant shell sends no data to any LLM.** It's literally a
+  styled input box whose submit triggers an `alert()` saying the
+  backend lands in Sprint 10. No outbound network calls.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-022** Operator-first UX reframe (the AI Security Operator
+  narrative)
+
+### FEATURES IMPLEMENTED
+
+| Feature                                            | Status | Notes                                              |
+| -------------------------------------------------- | ------ | -------------------------------------------------- |
+| `GET /api/v1/overview` aggregating endpoint        | ✅     | 5 panels in one round-trip; 30s UI refresh         |
+| `GET /api/v1/actions/feed?status=…`                | ✅     | All / resolved / stabilized / escalated tabs       |
+| Left-sidebar AppShell with pillar grouping         | ✅     | Mobile breakpoint keeps the old top nav            |
+| `/overview` route as new default landing           | ✅     | Old `/incidents` still works                       |
+| Personalised greeting + overnight KPI strip        | ✅     | 6 tiles, % delta vs yesterday                      |
+| Aegis Trust Score panel                            | ✅     | Score + label + 3 sub-metrics                      |
+| Risk Snapshot card                                 | ✅     | Single scalar v1; trend chart Sprint 11            |
+| Aegis Actions Feed as centerpiece                  | ✅     | Tabbed by outcome with live counts                  |
+| Requires Your Attention row                        | ✅     | 3 cards with deep links                             |
+| Top Active Policies (24h) sidebar                   | ✅     | Pulls from audit-chain payload                     |
+| Aegis Assistant shell (BETA)                       | ✅     | Suggested queries + input; chat in Sprint 10       |
+| Incident Detail → Aegis Decision Record           | ✅     | Two-column with Actions rail                        |
+
+### FILES CREATED (4)
+
+- `backend/app/api/v1/overview.py`
+- `backend/app/api/v1/actions_feed.py`
+- `frontend/src/lib/overview.ts`
+- `frontend/src/lib/actions.ts`
+- `frontend/src/pages/OverviewPage.tsx`
+
+### FILES MODIFIED (notable)
+
+- `backend/app/api/v1/router.py` — wire `overview` + `actions_feed`
+  routers
+- `frontend/src/App.tsx` — new `/overview` route + default landing
+- `frontend/src/components/layout/AppShell.tsx` — full rewrite to
+  the sidebar shell with pillar grouping
+- `frontend/src/pages/IncidentDetailPage.tsx` — Decision Record
+  layout; rollback moved to Actions rail
+- `docs/DECISIONS.md` — ADR-022
+
+### DATABASE CHANGES
+
+**None.** Both new endpoints aggregate existing tables.
+
+### API CHANGES
+
+| Method | Path                      | Auth    | Description                                    |
+| ------ | ------------------------- | ------- | ---------------------------------------------- |
+| GET    | `/api/v1/overview`        | bearer  | Aggregated KPI + trust + risk + attention      |
+| GET    | `/api/v1/actions/feed`    | bearer  | Tabbed action stream (status filter, limit)    |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                            | Owed-by Sprint |
+| ---- | ----------------------------------------------------------------------------------------------- | -------------- |
+| D-52 | Trust score + risk score + analyst-hours-saved + MRT are starter heuristics; need real calibration | Sprint 11 |
+| D-53 | Top Active Policies depends on `audit_logs.payload->>winning_policy_id` shape — fragile to payload changes; add a JSONB index when traffic warrants | Sprint 11 |
+| D-54 | Actions feed `policy_id` field is always null — needs an audit-chain join not done here          | Sprint 10      |
+| D-55 | Decision Record lacks tabbed view + inline rollback timeline                                     | Sprint 10      |
+| D-56 | Risk Analytics + Risk Explorer + System Status are sidebar placeholders ("soon")                | Sprints 11–12  |
+| D-57 | Aegis Assistant shell has no chat backend (`alert()` placeholder on submit)                     | Sprint 10      |
+| D-58 | `requires_attention.stabilized_systems` counts ALL-time stabilizations, not "still awaiting fix"; needs a "permanent fix landed?" field | Sprint 11 |
+
+(Open from prior sprints: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40, D-43, D-45, D-47–D-51.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-35 | Trust score formula gives an "Excellent" reading on a fresh DB with zero data — false confidence       | High       | Low      | Empty-history paths return 100 with adherence 100% by construction; consider a "Not enough data" label below a threshold (D-52 follow-up) |
+| R-36 | `/overview` runs 5 aggregations per request; under load can become a hot endpoint                      | Low        | Medium   | 30s client refresh interval; add HTTP cache headers + Redis memoization in Sprint 10 if needed |
+| R-37 | Stabilization-class set is hard-coded; adding a new containment action requires a code change to surface it correctly in the feed | Medium | Low | Move set into `RemediationActionClass` as a `.is_stabilization` property (parallel to `.is_reversible` from Sprint 4) when Sprint 10 lands |
+
+### ROLLBACK STRATEGY
+
+- **Routes:** swap `/` route back to `/incidents` and the sidebar
+  reverts to a one-page demotion. No data is migrated.
+- **Endpoints:** removing the two router includes pulls them from the
+  API; the underlying tables are untouched.
+- **AppShell:** the old top-nav shell is preserved in git history;
+  reverting one file (`AppShell.tsx`) restores the prior layout.
+
+### KNOWN LIMITATIONS
+
+1. **Aegis Assistant shell is non-functional.** Submit triggers an
+   alert message; real chat is Sprint 10.
+2. **Three sidebar entries say "soon"** — Risk Analytics, Risk
+   Explorer, System Status. Visible but non-interactive.
+3. **Trust + risk scores are starter heuristics.** Will skew on
+   small/empty datasets (R-35).
+4. **Decision Record has no tabs yet.** Single scroll page.
+5. **No on-page analytics on actions feed.** Counts come from the
+   endpoint; no in-feed sorting/filtering beyond outcome tab.
+
+### OBSERVABILITY (current state)
+
+- **Logs:** unchanged.
+- **Metrics:** unchanged. `/overview` requests show up in the
+  existing FastAPI auto-instrumentation; Sprint 8's audit-chain
+  activity counter is now visible on the Overview page indirectly
+  (via the action counts that back the same data).
+- **Traces:** unchanged; the two new endpoints flow through OTel
+  automatically.
+
+### NEXT STEPS — Sprint 10 candidate scope
+
+Working title: **"Aegis Assistant + Decision Record depth."**
+
+1. **Aegis Assistant chat backend** — RAG over audit_logs +
+   policies + incidents. Streaming responses. Suggested-query handlers
+   that compile to concrete queries (e.g. "what did you do overnight?"
+   → call `/overview` and narrate).
+2. **Decision Record tabs** — Overview / AI Reasoning / Risk &
+   Evidence / Related Alerts / Audit Trail.
+3. **`policy_id` on the actions feed** (D-54).
+4. **`is_stabilization` property on `RemediationActionClass`** (R-37
+   follow-up).
+5. **KMS adapter** (D-37) — re-scheduled from this sprint.
+
+Carry-over: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40,
+D-43, D-45, D-47–D-58.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-34 | Assistant — Claude-backed (matches Triage) or a smaller local model for cost?                            | Sprint 10 |
+| OQ-35 | Should the Assistant be able to PROPOSE actions (with explicit approval), or strictly read-only?         | Sprint 10 |
+| OQ-36 | Trust-score formula — calibrate against real customer data, or commit to a published spec?              | Sprint 11 |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 09 closeout
+
+### 1. The Overview as the demo opener
+
+The new Overview is the page a prospect should see first. It says
+"AI security operator + governance" before a single incident is
+read.
+
+- **Q38.** Do we re-record the Sprint 7 demo (audit chain) and
+  Sprint 5 demo (compliance officer) with the Overview as the
+  opening frame? The framing shift only matters if the *first*
+  thing a prospect sees is action-first.
+
+### 2. Assistant scope = product surface area
+
+The Assistant shell is BETA today, but the four suggested queries
+hint at the eventual scope ("what did you do overnight?", "why
+did you revoke?", "which policies generated the most?", "how much
+risk did we reduce?"). Once that lands, it becomes the most
+visible AI surface in the product.
+
+- **Q39.** Do we treat the Assistant as the primary AI surface
+  (and de-emphasise the per-incident AI Reasoning panel) or as a
+  parallel surface (and keep both)? Parallel is safer; primary is
+  bolder. My recommendation: **parallel** — the per-incident
+  reasoning IS the audit artifact. The Assistant is the lens.
+
+### 3. Trust Score as a public commitment
+
+We now show "Aegis Trust Score 92/100 — Excellent" on the
+landing page. Once a buyer sees this number, they'll ask what
+goes into it.
+
+- **Q40.** Do we publish the formula (along with SLOs from Q35) so
+  buyers can verify the math themselves? Calibration data is
+  proprietary, but the formula doesn't need to be. Recommendation:
+  **publish the formula** — it's part of the governance story.
+
+---
+
+> End of Sprint 09. Next entry: **Sprint 10 — Aegis Assistant + Decision Record depth.**
