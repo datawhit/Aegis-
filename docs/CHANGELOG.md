@@ -2243,3 +2243,256 @@ Both land in Sprint 8 or 9.
 ---
 
 > End of Sprint 07. Next entry: **Sprint 08 — Trace exploration + alerting.**
+
+---
+
+## SPRINT 08 — TRACE EXPLORATION + ALERTING
+
+- **DATE:** 2026-05-29
+- **STATUS:** Delivered. Awaiting review before Sprint 9 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Finish the observability loop. Sprint 7 wired OTel + a dashboard but
+traces went to stdout and there were no alerts — operators could see
+graphs but couldn't follow a request or get paged. Sprint 8 adds Tempo
+for trace exploration, two Grafana managed alert rules on the
+high-leverage SLOs, an audit-chain activity dashboard, and the
+verifier CLI's `--server-url` flag for offline-friendly key bootstrap.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **Tempo container** (`grafana/tempo:2.6.1`) in single-binary mode,
+  local-disk WAL + blocks. Receives OTLP/gRPC from the collector;
+  exposes the HTTP query API on `:3200` for Grafana. Block retention
+  capped at 24h for the local stack.
+- **Collector traces pipeline** now exports to `otlp/tempo` instead
+  of the stdout `debug` exporter. Debug exporter kept defined (just
+  unused) so a `docker logs aegis-otel-collector` still shows
+  something if Tempo's down.
+- **Tempo as a Grafana data source** — auto-provisioned alongside
+  Prometheus, with the Prometheus-correlation hint set so trace spans
+  link back to the metric panels.
+- **Grafana managed alert rules** (D-46, ADR-021):
+  - `aegis-5xx-burst` — 5xx rate > 1% sustained 5m → critical.
+  - `aegis-latency-p95` — p95 > 1s sustained 5m → warning.
+  Provisioned as YAML in `ops/grafana/provisioning/alerting/`. Routed
+  to a single `dev-stdout` webhook contact point (posts to the OTel
+  collector's debug log) — production overrides with a real receiver.
+- **Custom audit-chain counter** (`aegis_audit_entries_total`).
+  Lazy-initialised inside the `HashChainAuditLogger.record()` path,
+  labelled by `action`, `actor_type`, `resource_type`. Zero cost when
+  OTel isn't available (e.g., tests).
+- **"Aegis — Audit chain activity" dashboard** (D-44). Four panels:
+  entries/min by action, entries/min by actor_type, total rollback
+  denials in last hour, total signed exports in last 24h.
+- **`verify_audit_export.py --server-url`** (D-39, ADR-021). The
+  verifier CLI now accepts EITHER `--public-key /path/to.pem` (Sprint
+  4 behavior) OR `--server-url https://aegis.example.com`. The
+  latter fetches `/.well-known/aegis-audit-public-key`, looks up the
+  entry whose `key_id` matches the receipt's `signing_key_id`, and
+  verifies against that. The two flags are mutually exclusive.
+
+Explicitly out of scope:
+
+- KMS adapter (D-37) — Sprint 9, needs Q32 (AWS vs Vault) decided.
+- Loki for log aggregation (D-43) — Sprint 9+.
+- Memory limit on the collector (R-29 mitigation) — small, batched
+  with Sprint 9 hardening.
+- Trace exemplars on metric panels (the data is correlated by service
+  name but full exemplar wiring requires extra config).
+- Tempo S3/GCS backend for prod-grade durability — local-disk only here.
+
+### SECURITY CONSIDERATIONS
+
+- **Tempo runs unauthenticated on the Docker network.** Acceptable
+  for the local stack; in real envs, gate behind the same auth proxy
+  that fronts the rest of the app.
+- **Verifier `--server-url` uses `urllib.request.urlopen`** with a
+  15-second timeout. Operators are expected to pass an HTTPS URL in
+  prod; HTTP is allowed (the `noqa: S310` comment marks the
+  operator-supplied URL as the trust boundary).
+- **Alert webhook contact point points at the OTel collector's debug
+  log in dev.** No external network call. Real deploys must override
+  with a properly-credentialed Slack/PagerDuty receiver.
+- **Audit counter** emits labels for `action`, `actor_type`,
+  `resource_type` only — never the resource_id or payload contents.
+  Prometheus cardinality stays bounded.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-021** Tempo for traces, Grafana managed alerts for SLO signals
+
+### FEATURES IMPLEMENTED
+
+| Feature                                          | Status | Notes                                              |
+| ------------------------------------------------ | ------ | -------------------------------------------------- |
+| Tempo container in docker-compose                | ✅     | Single-binary, OTLP/gRPC :4317, query :3200        |
+| OTel collector → Tempo trace pipeline             | ✅     | Replaces debug-stdout exporter                     |
+| Tempo data source auto-provisioned in Grafana     | ✅     | With Prometheus correlation hint                   |
+| Alert rule: 5xx burst (critical, 1%/5m)           | ✅     |                                                    |
+| Alert rule: p95 latency > 1s (warning, 5m)        | ✅     |                                                    |
+| Notification policy + dev-stdout contact point    | ✅     | Webhook to collector debug log                      |
+| `aegis_audit_entries_total` counter               | ✅     | Labelled by action / actor_type / resource_type     |
+| Audit-chain activity dashboard                    | ✅     | 4 panels                                            |
+| Verifier `--server-url` flag                      | ✅     | Mutex with `--public-key`                          |
+| Tests: verifier `--server-url` happy + missing-key + mutex | ✅ | In-process http.server fixture; no FastAPI dep  |
+
+### FILES CREATED (5)
+
+- `ops/tempo/tempo.yaml`
+- `ops/grafana/provisioning/alerting/contact-points.yaml`
+- `ops/grafana/provisioning/alerting/policies.yaml`
+- `ops/grafana/provisioning/alerting/rules.yaml`
+- `ops/grafana/dashboards/aegis-audit-activity.json`
+- `backend/tests/test_verifier_cli_server_url.py`
+
+### FILES MODIFIED (notable)
+
+- `docker-compose.yml` — `tempo` service + `tempo-data` volume; OTel
+  collector now `depends_on: tempo`
+- `ops/otel/otel-collector-config.yaml` — traces pipeline points at
+  `otlp/tempo` instead of `debug`
+- `ops/grafana/provisioning/datasources/prometheus.yaml` — second
+  data source (Tempo) with serviceMap correlation
+- `backend/app/core/audit/logger.py` — lazy OTel meter +
+  `aegis_audit_entries_total` counter inside `record()`
+- `backend/app/scripts/verify_audit_export.py` — mutually-exclusive
+  `--public-key` / `--server-url`; well-known fetch path
+- `docs/DECISIONS.md` — ADR-021
+
+### DATABASE CHANGES
+
+**None.**
+
+### API CHANGES
+
+**None** to the existing HTTP surface. The verifier CLI gains a new
+flag; the well-known endpoint is unchanged.
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                          | Owed-by Sprint |
+| ---- | --------------------------------------------------------------------------------------------- | -------------- |
+| D-47 | Tempo storage is local-disk only — prod needs S3/GCS backend before traces are durable        | Sprint 9       |
+| D-48 | Collector lacks `memory_limiter` processor (R-29 mitigation)                                  | Sprint 9       |
+| D-49 | Trace exemplars on metric panels — service-map correlation works, exemplars need extra config | Sprint 9+      |
+| D-50 | Alert receiver is a single dev-stdout webhook; no per-severity routing or escalation          | Sprint 9       |
+| D-51 | Verifier `--server-url` doesn't pin a TLS cert (OQ-26 still open)                             | Sprint 9       |
+
+(Open from prior sprints: D-7, D-22, D-23, D-25, D-29, D-30, D-31, D-33, D-34, D-35, D-36, D-37, D-40, D-43, D-45.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-32 | Tempo's WAL on local disk fills up and writes start failing silently                                   | Low        | Medium   | 24h retention, weekly disk check (operator runbook). D-47 fixes proper.          |
+| R-33 | Audit counter cardinality explodes if `action` grows unbounded (e.g., per-tenant scoped)               | Medium     | Medium   | Action values are sourced from a known set (~30 distinct values today); add a CI check that fails on new actions without docs |
+| R-34 | Verifier `--server-url` over plain HTTP could be MITM-swapped to feed a forged public key             | Medium     | High     | Document that operators must use HTTPS; D-51 pins certs                          |
+
+### ROLLBACK STRATEGY
+
+- **Tempo:** stop the service; flip collector's traces pipeline back
+  to the `debug` exporter that's still defined. Visibility regresses
+  to stdout-only but the app keeps running.
+- **Alerts:** removing `ops/grafana/provisioning/alerting/` reverts to
+  no alerts (graphs only). Grafana keeps the contact points it has
+  already loaded until restart.
+- **Audit counter:** safe to revert — counter is best-effort and the
+  dashboard simply shows no data.
+- **Verifier `--server-url`:** the `--public-key` path is unchanged;
+  reverting the new flag is a single argparse change.
+
+### KNOWN LIMITATIONS
+
+1. **Tempo backend is local disk.** Fine for dev; D-47 for prod.
+2. **One alert receiver.** D-50 — real per-severity routing in Sprint 9.
+3. **Verifier doesn't pin TLS certs.** R-34 / D-51.
+4. **Audit counter only labels by action/actor_type/resource_type.**
+   No `tenant_id` (multi-tenancy is still deferred).
+
+### OBSERVABILITY (current state)
+
+- **Logs:** structlog → stdout. Unchanged.
+- **Metrics:** OTel → Prometheus → Grafana. Live; now with
+  `aegis_audit_entries_total` for audit activity.
+- **Traces:** OTel → collector → Tempo → Grafana Explore.
+  Service-map correlation with metrics.
+- **Audit chain:** new counter feeds the audit-activity dashboard.
+- **Alerts:** 5xx-burst (critical) and p95 latency (warning) live;
+  route to dev-stdout webhook. Production overrides receiver.
+
+### NEXT STEPS — Sprint 09 candidate scope
+
+Working title: **"KMS-backed signing + production hardening."**
+
+The compliance wedge and observability are now operationally complete.
+Sprint 9 is the bridge from "feature-complete demoable" to
+"deployable to a design partner with their own infra constraints":
+
+1. **KMS adapter for the signing key** (D-37) — pick AWS KMS or
+   HashiCorp Vault (OQ-25 / Q32). Implement one cleanly; the second
+   is a follow-on.
+2. **Tempo S3/GCS backend** (D-47) for trace durability in prod.
+3. **Collector `memory_limiter` processor** (D-48 / R-29).
+4. **Verifier `--server-url` TLS pin** (D-51 / R-34).
+5. **httpOnly cookie auth + CSRF** (D-7, deferred since Phase 0).
+
+Carry-over: D-22, D-23, D-25, D-29, D-30, D-31, D-33, D-34, D-35,
+D-36, D-40, D-43, D-45, D-49, D-50.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-31 | Tempo backend — S3 (broadest), GCS (matches our first design partner if FinServ), or both abstracted?   | Sprint 9  |
+| OQ-32 | Alert routing in real envs — Slack-only (simplest) or Slack-warn / PagerDuty-critical (two channels)?    | Sprint 9  |
+| OQ-33 | Should we expose a `?key_id=` filter on `/.well-known/aegis-audit-public-key` so verifiers can fetch a single entry, or always return the whole registry? | Sprint 9 |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 08 closeout
+
+Prior sprints' questions still stand. Three new ones from finishing
+observability:
+
+### 1. SLO commitments as a buyer artifact
+
+Sprint 8 ships two alerts (`5xx burst at 1%`, `p95 over 1s`). These
+imply SLOs — but we haven't published them.
+
+- **Q35.** Do we publish customer-facing SLOs (e.g., "99.9% of audit
+  exports complete in <1s, measured monthly") as part of the
+  commercial offering? Publishing them constrains us; not publishing
+  cedes the trust framing to incumbents who do. My recommendation:
+  **publish two SLOs at GA** (export latency, ingest latency), not
+  five — small commitments are easier to honor.
+
+### 2. The audit-activity dashboard as a sales artifact
+
+The audit-chain activity dashboard is now visually compelling — you
+can SEE the AI's decisions accumulating in the chain.
+
+- **Q36.** Do we record a 60-second video walkthrough of this
+  dashboard for the sales motion (Q29 reprise)? "Watch the system
+  decide" is a more visceral demo than the prior compliance-officer
+  flow.
+
+### 3. Alerts as a customer-configurable surface
+
+The alert rules are server-managed today. In a multi-tenant world
+each tenant might want different thresholds (a high-volume retail
+tenant has a different definition of "5xx burst" than a small SaaS).
+
+- **Q37.** Defer multi-tenancy thinking until we have one paying
+  customer (current plan), or sketch the per-tenant alert override
+  story now while the alert infra is fresh? My recommendation:
+  **defer**. Don't build for a tenant we don't yet have.
+
+---
+
+> End of Sprint 08. Next entry: **Sprint 09 — KMS-backed signing + production hardening.**

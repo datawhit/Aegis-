@@ -1,0 +1,15 @@
+# Grafana managed alerts — notification policies (Sprint 8).
+#
+# Root policy routes everything to the dev-stdout contact point.
+# Real deployments will add label-based routes (severity=critical →
+# pagerduty, severity=warning → slack, etc.) on top of this.
+
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: dev-stdout
+    group_by: [alertname]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

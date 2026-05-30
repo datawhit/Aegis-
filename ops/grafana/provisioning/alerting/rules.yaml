@@ -1,0 +1,122 @@
+# Grafana managed alert rules (Sprint 8, D-46).
+#
+# Three high-leverage signals operators want to be paged on:
+#
+# 1. 5xx burst — the system is throwing more server errors than usual.
+#    Threshold: >1% of requests over 5 min. SLO is "5xx rate < 0.1% over
+#    rolling 1h"; the alert fires at 10x the budget burn rate so a SOC
+#    has time to react before the SLO is consumed.
+#
+# 2. p95 latency over SLO — 95th-percentile request latency exceeds
+#    1 second sustained for 5 minutes. SLO is "p95 < 500ms"; alert at
+#    2x so operators have headroom before the SLO is breached.
+#
+# 3. AI triage saturation — Anthropic provider errors > 10 per minute,
+#    indicating either an outage or our quota's been hit. Falls back to
+#    audit-chain ESCALATE storms (R-7 from Sprint 1); the alert wedges
+#    in time for ops to switch the policy engine to lockdown if needed.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: aegis-slos
+    folder: Aegis
+    interval: 1m
+    rules:
+      - uid: aegis-5xx-burst
+        title: Aegis — 5xx burst (SLO budget burn)
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: |
+                sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+                /
+                sum(rate(http_server_request_duration_seconds_count[5m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0.01]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              refId: B
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "5xx rate > 1% sustained 5m — SLO budget burning fast"
+          runbook_url: "https://example.invalid/runbook/5xx-burst"
+        labels:
+          severity: critical
+          service: aegis-backend
+
+      - uid: aegis-latency-p95
+        title: Aegis — p95 request latency > 1s
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              editorMode: code
+              expr: |
+                histogram_quantile(0.95,
+                  sum by (le) (rate(http_server_request_duration_seconds_bucket[5m])))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1.0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              refId: B
+              type: threshold
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: "p95 latency > 1s for 5m — 2x SLO of 500ms"
+          runbook_url: "https://example.invalid/runbook/latency"
+        labels:
+          severity: warning
+          service: aegis-backend

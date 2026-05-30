@@ -1,0 +1,34 @@
+# Grafana Tempo — single-binary local config (Sprint 8).
+#
+# Receives OTLP from the otel-collector on :4317; serves the trace query
+# API to Grafana on :3200. Local-disk WAL + blocks under /var/tempo —
+# fine for dev, not for prod (S3/GCS backend lands when we have a prod
+# environment to put it in).
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  trace_idle_period: 10s
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 24h   # dev retention; raise for real envs
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks

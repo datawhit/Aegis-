@@ -35,6 +35,29 @@ from app.models.audit_log import ActorType, AuditLog
 
 log = get_logger("audit")
 
+# Sprint 8: emit one counter per audit entry written, labelled by action +
+# actor_type. Backs the "audit-chain activity" Grafana dashboard (D-44).
+# Lazy-initialised so processes that don't import opentelemetry (e.g.
+# pytest with AEGIS_OTEL_ENABLED=false) don't pay the cost.
+_audit_counter: Any | None = None
+
+
+def _audit_meter() -> Any | None:
+    global _audit_counter
+    if _audit_counter is not None:
+        return _audit_counter
+    try:
+        from opentelemetry import metrics
+    except ImportError:  # pragma: no cover — OTel deps always installed
+        return None
+    meter = metrics.get_meter("aegis.audit")
+    _audit_counter = meter.create_counter(
+        name="aegis_audit_entries_total",
+        unit="1",
+        description="Audit chain entries written, labelled by action + actor_type.",
+    )
+    return _audit_counter
+
 
 @dataclass(frozen=True)
 class Actor:
@@ -125,6 +148,16 @@ class HashChainAuditLogger(AuditLogger):
 
             audit_session.add(entry)
             await audit_session.flush()
+            counter = _audit_meter()
+            if counter is not None:
+                counter.add(
+                    1,
+                    attributes={
+                        "action": action,
+                        "actor_type": actor.type.value,
+                        "resource_type": resource_type,
+                    },
+                )
             log.info(
                 "audit.recorded",
                 entry_id=str(entry.id),

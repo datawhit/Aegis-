@@ -1,0 +1,23 @@
+# Grafana managed alerts — contact points (Sprint 8, D-46).
+#
+# The local stack ships a "dev-stdout" contact point so alerts can fire
+# in development without spamming a real channel. In staging/prod
+# deployments, override this file (or layer one on top via additional
+# provisioning) with Slack / PagerDuty / Opsgenie integrations.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: dev-stdout
+    receivers:
+      - uid: dev-stdout-receiver
+        type: webhook
+        # Local dev: post to the OTel collector's debug endpoint so the
+        # alert lands in the collector's stdout log. Operators see it
+        # alongside the traces/metrics noise without configuring a real
+        # channel. Override to a real webhook in staging/prod.
+        settings:
+          url: http://otel-collector:4318/v1/logs
+          httpMethod: POST
+        disableResolveMessage: false

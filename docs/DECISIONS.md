@@ -562,6 +562,47 @@
 
 ---
 
+## ADR-021 — Tempo for traces, Grafana managed alerts for SLO signals
+
+- **Date:** 2026-05-29 (Sprint 08)
+- **Status:** Accepted; closes D-42 and D-46 from Sprint 7
+- **Context:** Sprint 7's OTel landing emitted traces to the collector's
+  stdout exporter (placeholder) and shipped a dashboard with no
+  alerting. Operators can see graphs but can't follow a request through
+  the stack or get paged when an SLO burns.
+- **Decision:**
+  - **Traces → Grafana Tempo.** Single-binary mode, local-disk WAL,
+    OTLP/gRPC ingest. Grafana provisions Tempo as a second data source
+    with the Prometheus correlation hint, so a trace's spans link
+    back to the matching metric panels.
+  - **Alerts → Grafana managed alert rules.** Two rules to start:
+    `aegis-5xx-burst` (5xx rate > 1% over 5m → critical) and
+    `aegis-latency-p95` (p95 > 1s over 5m → warning). Provisioned as
+    YAML in `ops/grafana/provisioning/alerting/`. Local dev routes
+    notifications to a webhook contact point pointing at the OTel
+    collector's debug log; real envs override the contact point.
+- **Why Tempo over Jaeger** (OQ-28 settled):
+  - Grafana-native — no third UI to learn or proxy auth into.
+  - YAML-config single binary keeps the local stack additive to what
+    Sprint 7 already had.
+  - Jaeger has the wider ecosystem but the marginal value at our
+    current trace volume doesn't justify another container.
+- **Why Grafana managed alerts over Alertmanager** (OQ-29 settled):
+  - Same provisioning lane as dashboards (`ops/grafana/provisioning/`).
+  - One UI for alert state + dashboard panels.
+  - Alertmanager + Prometheus rules wins on routing complexity, which
+    we don't need yet — single contact point is fine.
+- **Consequences:**
+  - + One observability surface instead of three.
+  - + Alert rules are diffable in the repo, not click-built.
+  - – Tempo's storage is local-disk only in this config; real envs
+    need a backend (S3/GCS) before traces are durable.
+  - – Grafana managed alerts don't support all of Alertmanager's
+    routing tree shapes; if we grow into per-tenant routing we'll
+    revisit.
+
+---
+
 ## ADR template (for future ADRs)
 
 ```

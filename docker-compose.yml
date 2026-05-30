@@ -2,7 +2,8 @@
 # Aegis — local development stack
 # Phase 0:  Postgres+pgvector, Redis, FastAPI, Celery worker, Vite frontend.
 # Sprint 7: OTel collector + Prometheus + Grafana (D-3, finally landed).
-# Deferred: Temporal, LocalStack, Loki (Sprint 8+).
+# Sprint 8: Tempo (traces) + Grafana alert rules (closes D-42, D-46).
+# Deferred: Temporal, LocalStack, Loki (Sprint 9+).
 # =============================================================================
 
 name: aegis
@@ -113,6 +114,23 @@ services:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
       - "8889:8889"   # Prometheus exporter
+    depends_on:
+      - tempo
+
+  # Tempo — trace storage backend. Receives OTLP from the collector;
+  # Grafana reads back from its 3200 HTTP API. Single-binary mode,
+  # local-disk WAL — fine for dev, not for prod.
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: aegis-tempo
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./ops/tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # HTTP query API (Grafana data source)
+      - "4319:4317"   # OTLP gRPC, host:container (host port avoids the collector clash)
 
   prometheus:
     image: prom/prometheus:v2.55.0
@@ -152,3 +170,4 @@ volumes:
   redis-data:
   prometheus-data:
   grafana-data:
+  tempo-data:
