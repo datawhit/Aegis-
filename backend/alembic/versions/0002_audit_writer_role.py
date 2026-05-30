@@ -49,7 +49,18 @@ def upgrade() -> None:
         """
     )
     # Grant connect on the current database + usage on schema public.
-    op.execute(f"GRANT CONNECT ON DATABASE CURRENT_DATABASE() TO {_ROLE};")
+    # CURRENT_DATABASE() is a function, not an identifier — use a DO block
+    # with EXECUTE format() so the migration runs against whichever DB it's
+    # applied to (aegis locally, aegis_test in CI).
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            EXECUTE format('GRANT CONNECT ON DATABASE %I TO {_ROLE}', current_database());
+        END
+        $$;
+        """
+    )
     op.execute(f"GRANT USAGE ON SCHEMA public TO {_ROLE};")
 
     # INSERT only on audit_logs. No SELECT (Phase 2 doesn't surface audit
@@ -67,4 +78,12 @@ def downgrade() -> None:
     # have customized it. Operators can `DROP ROLE` manually.
     op.execute(f"REVOKE INSERT ON TABLE audit_logs FROM {_ROLE};")
     op.execute(f"REVOKE USAGE ON SCHEMA public FROM {_ROLE};")
-    op.execute(f"REVOKE CONNECT ON DATABASE CURRENT_DATABASE() FROM {_ROLE};")
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            EXECUTE format('REVOKE CONNECT ON DATABASE %I FROM {_ROLE}', current_database());
+        END
+        $$;
+        """
+    )
