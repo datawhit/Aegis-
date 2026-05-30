@@ -454,6 +454,75 @@
 
 ---
 
+## ADR-018 — Multi-key signing registry with file-based storage
+
+- **Date:** 2026-05-29 (Sprint 06)
+- **Status:** Accepted; supersedes the single-key shape introduced in ADR-015
+- **Context:** ADR-015 shipped one private key in `AEGIS_AUDIT_EXPORT_SIGNING_KEY`.
+  Rotation under that scheme silently breaks past exports: once the
+  active key changes, the only public PEM the system can publish is
+  the new one, but every receipt signed before the switch refers to
+  the old key by `signing_key_id`. Auditors have to track those PEMs
+  out-of-band, defeating the verifier's "ask the server for the public
+  key" story.
+- **Decision:** Introduce a registry of keys. Exactly one entry has
+  `status: "active"` (the signer uses it); any number have
+  `status: "retired"` (public_pem retained so verification of old
+  exports keeps working). Storage is a JSON file at
+  `AEGIS_AUDIT_KEY_REGISTRY_PATH` so operators can rotate without an
+  env var redeploy — point at a new file, restart, done. Single-key
+  mode from Sprint 4 is preserved as a fallback when the registry path
+  is unset.
+- **Why file over env / KMS:**
+  - Env: PEMs are bulky and embedding multiple entries as JSON in an
+    env var is painful to maintain.
+  - KMS (AWS/GCP/Vault): the right answer eventually, but requires a
+    KMS-specific adapter — explicitly deferred (D-37) in favor of
+    landing rotation mechanics today.
+  - File: each environment owns its own file in its secrets layer
+    (mounted secret, K8s projected volume, etc.).
+- **Consequences:**
+  - + Rotation is a file edit + restart — no code change.
+  - + Verifiers can pin by `signing_key_id` and the well-known endpoint
+    will publish the matching public PEM forever (until that entry is
+    explicitly removed from the registry).
+  - + Backward-compatible with Sprint 4 single-key deployments.
+  - – One more thing for operators to forget — boot-time validation
+    (which we don't yet have) would catch a missing/malformed file.
+
+---
+
+## ADR-019 — `/.well-known/aegis-audit-public-key` for verifier bootstrap
+
+- **Date:** 2026-05-29 (Sprint 06)
+- **Status:** Accepted
+- **Context:** The signed-receipt verifier needs the active server's
+  public key (and any retired keys still in scope) to validate exports.
+  Until now the only distribution channel was "ask the operator to send
+  you the PEM." That doesn't scale for a compliance officer doing
+  spot-checks, and it leaves room for impersonation if a bad PEM gets
+  sent.
+- **Decision:** Serve the registry's public view at
+  `/.well-known/aegis-audit-public-key` — unauthenticated, JSON shape
+  `{"keys":[{"key_id":"...","status":"...","public_pem":"..."}]}`,
+  always reads from the same registry that backs the signer. The
+  verifier CLI (Sprint 4) will be extended to fetch this URL when run
+  with a `--server-url` flag instead of `--public-key` (deferred to
+  Sprint 7).
+- **Why root path + unauthenticated:**
+  - RFC 5785 convention: `/.well-known/` is reserved for site-wide
+    metadata that's safe to expose without auth.
+  - An auditor with no credentials still needs to verify — gating this
+    would defeat the purpose.
+  - Public key material is, by definition, public.
+- **Consequences:**
+  - + Verification works end-to-end without out-of-band coordination.
+  - + The endpoint is intentionally cacheable by reverse proxies.
+  - – Anyone can discover the operating org's key_ids, which is a tiny
+    fingerprinting signal — accepted given the public-by-design nature.
+
+---
+
 ## ADR template (for future ADRs)
 
 ```

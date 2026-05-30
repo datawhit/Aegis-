@@ -21,6 +21,7 @@ from app.api.deps import AdminOrReviewerDep, SessionDep
 from app.config import settings
 from app.core.audit.export_signer import (
     SigningKeyUnavailable,
+    active_signing_key_id,
     build_receipt,
     entries_digest,
     load_private_key,
@@ -133,6 +134,18 @@ async def export_audit(
     snapshot_until = tip_row.created_at if tip_row is not None else None
     tip_entry_hash = tip_row.entry_hash if tip_row is not None else None
 
+    # Production guardrail (R-23): operators cannot opt out of signing
+    # in staging/prod via a query string. The escape hatch exists only
+    # for local dev and CI where a key may not be configured.
+    if not require_signature and settings.is_production:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "?require_signature=false is not permitted in production. "
+                "Configure AEGIS_AUDIT_EXPORT_SIGNING_KEY."
+            ),
+        )
+
     try:
         private_key = load_private_key()
         signing_available = True
@@ -144,6 +157,8 @@ async def export_audit(
             ) from None
         private_key = None
         signing_available = False
+
+    key_id = active_signing_key_id()
 
     # Record the export request on the chain. This audit entry should NOT
     # appear in this export — but it WILL appear in any future export,
@@ -158,7 +173,7 @@ async def export_audit(
             "since": since.isoformat() if since else None,
             "snapshot_until": snapshot_until.isoformat() if snapshot_until else None,
             "tip_entry_hash": tip_entry_hash,
-            "signing_key_id": settings.audit_export_signing_key_id,
+            "signing_key_id": key_id,
             "signed": signing_available,
         },
     )
@@ -199,7 +214,7 @@ async def export_audit(
             tip_entry_hash=tip_entry_hash,
             content_hash=entries_digest(entry_hashes),
             exported_by=current_user.email,
-            signing_key_id=settings.audit_export_signing_key_id,
+            signing_key_id=key_id,
         )
         if private_key is not None:
             receipt = sign_receipt(receipt, private_key)

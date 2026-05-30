@@ -155,3 +155,19 @@ async def test_audit_export_rejects_viewer(client, db_session) -> None:
         headers={"Authorization": f"Bearer {access}"},
     )
     assert response.status_code == 403
+
+
+async def test_audit_export_refuses_require_signature_false_in_prod(
+    client, db_session, monkeypatch
+) -> None:
+    """R-23 guardrail: ?require_signature=false is a local-dev escape hatch only."""
+    monkeypatch.setattr(settings, "env", "prod")
+    _, access = await _make_user(db_session, UserRole.ADMIN, "admin@example.com")
+    await db_session.commit()
+
+    response = await client.get(
+        "/api/v1/audit/export?require_signature=false",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert response.status_code == 400
+    assert "not permitted in production" in response.json()["detail"]

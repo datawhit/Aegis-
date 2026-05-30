@@ -69,13 +69,42 @@ def _canonical_bytes(payload: dict[str, Any]) -> bytes:
 
 
 def load_private_key(pem: str | None = None) -> Ed25519PrivateKey:
-    pem_text = pem if pem is not None else settings.audit_export_signing_key
-    if not pem_text:
-        raise SigningKeyUnavailable("audit_export_signing_key is not configured")
-    key = serialization.load_pem_private_key(pem_text.encode("utf-8"), password=None)
-    if not isinstance(key, Ed25519PrivateKey):
-        raise SigningKeyUnavailable("audit_export_signing_key is not an Ed25519 key")
-    return key
+    """Load the Ed25519 private key currently used for signing exports.
+
+    With an explicit `pem` arg this loads that PEM directly (used by
+    tests). Otherwise, the active key is resolved via the registry —
+    which itself falls back to the single-key env var for backward
+    compatibility with Sprint 4 deployments.
+    """
+    if pem is not None:
+        if not pem:
+            raise SigningKeyUnavailable("empty PEM passed to load_private_key")
+        key = serialization.load_pem_private_key(pem.encode("utf-8"), password=None)
+        if not isinstance(key, Ed25519PrivateKey):
+            raise SigningKeyUnavailable("PEM is not an Ed25519 key")
+        return key
+
+    # Import lazily so the registry module's import-time settings access
+    # can't deadlock with this module's own settings import.
+    from app.core.audit.key_registry import KeyRegistryError, load_registry
+
+    try:
+        registry = load_registry()
+    except KeyRegistryError as exc:
+        raise SigningKeyUnavailable(str(exc)) from exc
+    return registry.active_private_key()
+
+
+def active_signing_key_id() -> str:
+    """Resolved key_id of the active signing key (used by the receipt)."""
+    from app.core.audit.key_registry import KeyRegistryError, load_registry
+
+    try:
+        return load_registry().active().key_id
+    except KeyRegistryError:
+        # Single-key fallback already covers this — but if nothing is
+        # configured at all, hand back the legacy "dev-unsigned" sentinel.
+        return settings.audit_export_signing_key_id
 
 
 def public_key_pem(private_key: Ed25519PrivateKey) -> str:

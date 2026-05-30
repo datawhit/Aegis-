@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api.v1.router import api_router
+from app.api.well_known import router as well_known_router
 from app.config import settings
 from app.logging import configure_logging, get_logger
 
@@ -44,3 +45,5 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+# Well-known endpoints live at the root, not under /api/v1, per RFC 5785.
+app.include_router(well_known_router, tags=["well-known"])

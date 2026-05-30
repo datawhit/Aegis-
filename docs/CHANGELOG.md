@@ -1726,4 +1726,256 @@ their own policies without filing tickets.
 
 ---
 
-> End of Sprint 05. Next entry: **Sprint 06 — Operational visibility (for real).**
+> End of Sprint 05. Next entry: **Sprint 06 — Compliance posture, complete.**
+
+---
+
+## SPRINT 06 — COMPLIANCE POSTURE, COMPLETE
+
+- **DATE:** 2026-05-29
+- **STATUS:** Delivered. Awaiting review before Sprint 7 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Close out the unfinished half of Sprint 04. Sprint 04 shipped signed
+exports + a reviewer role; Sprint 06 makes the signing infrastructure
+production-ready (multi-key registry, public-key well-known endpoint,
+prod guardrail) and adds attempt-visibility to the rollback gate that
+was the other compliance ask.
+
+OTel observability and the mobile layout pass — the original Sprint 06
+candidate scope from Sprint 05's closeout — are explicitly NOT here.
+They're deferred to Sprint 7. The judgement call: the compliance wedge
+is the differentiator vs. incumbents, and shipping signing rotation
+finishes that story; OTel is internal-tooling work that can wait one
+more sprint.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **Production guardrail (R-23).** `GET /api/v1/audit/export` refuses
+  `?require_signature=false` when `settings.is_production` is true.
+  Returns `400` with an explicit message rather than silently emitting
+  an unsigned receipt. Local + CI keep the escape hatch.
+- **Multi-key signing registry (D-26/D-27, ADR-018).** New module
+  `app/core/audit/key_registry.py` holds a registry of `KeyEntry`
+  records. Exactly one is `status: "active"` (the signer); any number
+  are `status: "retired"` (public_pem retained for past-export
+  verification). Storage is a JSON file at
+  `AEGIS_AUDIT_KEY_REGISTRY_PATH`. Single-key mode from Sprint 4 is
+  preserved as a fallback when the path is unset.
+- **`/.well-known/aegis-audit-public-key` endpoint (D-28, ADR-019).**
+  Unauthenticated route serving the registry's public view (no private
+  PEMs). Lets verifiers bootstrap by `key_id` without out-of-band PEM
+  exchange.
+- **Audit denials for rollback 403s (R-21).** Every 403 on
+  `POST /remediations/{id}/rollback` writes a
+  `remediation.rollback_denied` entry to the chain with `reason_code`
+  (`role_insufficient` | `non_reversible_requires_admin`), the
+  actor's role, the action class, and the human-readable detail. A
+  SOC manager can now see "operator X tried to undo
+  `revoke_user_sessions` at T" without scraping app logs.
+- **Active-key-id resolution helper** (`active_signing_key_id()` in
+  `export_signer`) so the receipt's `signing_key_id` always tracks the
+  registry's active entry instead of the legacy
+  `audit_export_signing_key_id` env var.
+
+Explicitly out of scope:
+
+- OTel collector + Grafana dashboards (D-3, FIFTH sprint deferred).
+  Sprint 7.
+- Mobile-responsive layout pass (D-32). Sprint 7.
+- KMS-backed signing (no AWS/GCP KMS / Vault adapter). D-37 below.
+- Verifier CLI extension to fetch public keys via `--server-url`
+  pointing at the well-known endpoint. Sprint 7.
+
+### SECURITY CONSIDERATIONS
+
+- **No path to unsigned exports in production.** The 400 fires before
+  the audit logger writes anything — operators can't accidentally ship
+  a `"signature": null` receipt to an auditor.
+- **The well-known endpoint never leaks private material.** The
+  registry's `public_view()` helper strips `private_pem`; the
+  endpoint test asserts this directly.
+- **The well-known endpoint is unauthenticated by design.** RFC 5785
+  + the fact that public keys are public-by-definition. An auditor
+  must be able to fetch the right PEM without a credential to verify a
+  receipt.
+- **Audit denials extend the chain** — they go through the same
+  `HashChainAuditLogger.record()` path as any other audit entry, with
+  the actor's identity attached. A manager reviewing the chain sees
+  attempts as first-class events.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-018** Multi-key signing registry with file-based storage
+- **ADR-019** `/.well-known/aegis-audit-public-key` for verifier bootstrap
+
+### FEATURES IMPLEMENTED
+
+| Feature                                            | Status | Notes                                              |
+| -------------------------------------------------- | ------ | -------------------------------------------------- |
+| Prod guardrail on `?require_signature=false`       | ✅     | 400 in staging/prod; pass-through in local/ci/dev  |
+| `KeyRegistry` + `KeyEntry` + `load_registry()`     | ✅     | Validates one-active invariant on construction     |
+| Single-key fallback path                            | ✅     | Backward-compatible with Sprint 4 deployments      |
+| `active_signing_key_id()` helper                    | ✅     | Receipt + audit payload track registry, not env    |
+| `GET /.well-known/aegis-audit-public-key`           | ✅     | Unauthenticated; 503 when no key configured        |
+| `remediation.rollback_denied` audit entries         | ✅     | Both role-mismatch and non-reversible paths        |
+| Tests: key registry unit (11 cases)                 | ✅     | One-active invariant, duplicate id, file load, fallback |
+| Tests: well-known endpoint (3 cases)                | ✅     | Public view, no-auth, 503-when-unset                |
+| Tests: prod guardrail                               | ✅     | 400 with explicit message                           |
+| Tests: rollback denial audit entry                  | ✅     | Asserts payload shape on the chain                  |
+
+### FILES CREATED (3)
+
+- `backend/app/core/audit/key_registry.py`
+- `backend/app/api/well_known.py`
+- `backend/tests/test_key_registry.py`
+- `backend/tests/test_well_known.py`
+
+### FILES MODIFIED (notable)
+
+- `backend/app/api/v1/audit.py` — R-23 guardrail at top of
+  `/audit/export`; receipt + audit entry use `active_signing_key_id()`
+- `backend/app/api/v1/remediations.py` — `_audit_denial()` helper +
+  two new audit writes on the 403 paths
+- `backend/app/core/audit/export_signer.py` — `load_private_key()`
+  pulls from the registry; new `active_signing_key_id()` export
+- `backend/app/config.py` — `audit_key_registry_path` setting
+- `backend/app/main.py` — mount the well-known router at the root
+- `backend/tests/test_audit_export.py` — prod guardrail case
+- `backend/tests/test_rollback_rbac.py` — denial-audit case
+- `.env.example` — `AEGIS_AUDIT_KEY_REGISTRY_PATH` documented
+- `docs/DECISIONS.md` — ADRs 018, 019
+
+### DATABASE CHANGES
+
+**None.** No migrations this sprint.
+
+### API CHANGES
+
+| Method | Path                                       | Auth     | Description                                       |
+| ------ | ------------------------------------------ | -------- | ------------------------------------------------- |
+| GET    | `/.well-known/aegis-audit-public-key`      | none     | Active + retired public keys (JSON)              |
+| GET    | `/api/v1/audit/export?require_signature=false` | admin/reviewer | Returns 400 in staging/prod (was: pass-through) |
+| POST   | `/api/v1/remediations/{id}/rollback`       | (existing) | 403 path now writes `remediation.rollback_denied` audit entry |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                                   | Owed-by Sprint |
+| ---- | ------------------------------------------------------------------------------------------------------ | -------------- |
+| D-37 | KMS adapter (AWS KMS / GCP KMS / Vault) for the signing private key — file storage today               | Sprint 7+      |
+| D-38 | Boot-time validation of `AEGIS_AUDIT_KEY_REGISTRY_PATH` — currently fails only on first request        | Sprint 7       |
+| D-39 | Verifier CLI: add `--server-url` to fetch public keys from `/.well-known` instead of `--public-key`    | Sprint 7       |
+| D-40 | Rollback denial audit payload has no incident_id — the denial is searchable by `remediation_action_id` only | Sprint 7+ |
+| D-41 | `/.well-known/aegis-audit-public-key` should set a long Cache-Control max-age (currently default)       | Sprint 7       |
+
+(Open from prior sprints: D-3, D-7, D-22, D-23, D-25, D-29–D-36.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-26 | Registry file corrupted or unparseable in prod → every export request 503s until repaired             | Low        | High     | D-38 boot-time validation; consider a `--check` CLI                              |
+| R-27 | Rotation procedure documented but not automated — operator could forget to mark old key `retired`     | Medium     | Medium   | The registry's one-active invariant means a rotation that doesn't retire the old key won't even load |
+| R-28 | Audit-denial entries inflate chain size if a buggy client retries 403s in a loop                       | Low        | Medium   | Rate-limit denial writes per-actor in Sprint 7 (or accept; this is a real signal) |
+
+### ROLLBACK STRATEGY
+
+- **Schema:** no migrations.
+- **Registry:** unsetting `AEGIS_AUDIT_KEY_REGISTRY_PATH` falls back to
+  single-key mode (Sprint 4 behavior). Operators who never created a
+  registry file are unaffected by this sprint.
+- **Well-known endpoint:** removing the `include_router` line in
+  `main.py` reverts to no public-key endpoint; signing path is
+  untouched.
+- **Prod guardrail:** `is_production` evaluates from `AEGIS_ENV`; set
+  to `local` to lift the gate (NOT recommended; the guardrail exists
+  for a reason).
+- **Denial audit entries:** removing the `_audit_denial()` calls in
+  `remediations.py` reverts to silent-403; the audit logger itself
+  needs no change.
+
+### KNOWN LIMITATIONS
+
+1. **File-based registry only.** No KMS / cloud-managed key adapter
+   (D-37). Operators handle key material on disk.
+2. **No rotation tooling.** Add a key, mark the old one retired,
+   restart — manual. Sprint 7 may ship a `rotate-key` make target.
+3. **Well-known endpoint not cached.** No `Cache-Control: max-age=...`
+   header today (D-41); downstream CDNs would re-fetch every request.
+4. **Verifier CLI still requires `--public-key` flag** — does not yet
+   know how to bootstrap from `/.well-known` (D-39).
+
+### OBSERVABILITY (current state)
+
+- **Logs:** new structured events: `rollback.denied.non_reversible`
+  (was already there; still emitted), plus the new
+  `remediation.rollback_denied` audit chain entry. No new app-level
+  logger calls otherwise.
+- **Metrics / traces:** still unwired. D-3 carried for the fifth sprint.
+- **Audit chain:** denial events now appear inline with other
+  remediation activity, scoped to the same `resource_id`.
+
+### NEXT STEPS — Sprint 07 candidate scope
+
+Working title: **"Operational visibility (for real, this time, finally)."**
+
+D-3 has been deferred for five sprints. Sprint 7 must land it OR
+explicitly demote it.
+
+1. **OTel collector container** in `docker-compose.yml`.
+2. **FastAPI + SQLAlchemy + Celery + httpx auto-instrumentation.**
+3. **Grafana + dashboard JSON.**
+4. **Mobile layout pass** (D-32).
+5. **Boot-time registry validation** (D-38).
+6. **Verifier CLI `--server-url` flag** (D-39).
+7. **`Cache-Control` on the well-known endpoint** (D-41).
+
+Carry-over: D-7, D-22, D-23, D-25, D-29–D-36, D-37, D-40.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-25 | KMS adapter priority — AWS KMS first (largest customer base), or HashiCorp Vault (on-prem-friendly)?   | Sprint 7  |
+| OQ-26 | Should the verifier CLI's `--server-url` mode require a TLS cert pin, or trust the OS bundle?           | Sprint 7  |
+| OQ-27 | Do we ship a `rotate-key` Make target that does the registry edit + restart, or document a runbook?     | Sprint 7  |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 06 closeout
+
+Prior sprints' questions still stand. The compliance wedge is now
+operationally complete; two follow-ups surfaced from finishing it:
+
+### 1. The audit chain as a billable artifact
+
+Sprint 4 raised Q21 (signed JSONL receipt as a Phase 3 wedge). Sprint 6
+makes rotation real, which is the missing piece auditors will ask
+about. The compliance-officer demo from Sprint 5 is now production-grade.
+
+- **Q31.** Do we package "verifiable audit export with signed
+  receipts and a published public-key endpoint" as a *named SKU*
+  (e.g. "Aegis Compliance Pack") on top of the base platform price,
+  or bundle it free as the trust differentiator? My recommendation:
+  **bundle free**; the cost of letting the wedge be a checkbox on a
+  competitor's RFP response is greater than the line-item revenue.
+
+### 2. KMS-or-file as a vendor signal
+
+D-37 (KMS adapter) will land in Sprint 7 or 8. The choice — AWS KMS
+first vs. HashiCorp Vault first — telegraphs which buyer profile we're
+chasing in 2026 H2.
+
+- **Q32.** AWS KMS first reads "we are SaaS-native, AWS-default" to
+  cloud-mid-market buyers. Vault first reads "we take on-prem
+  seriously" to FinServ/Healthcare regulated buyers (revisits Q23).
+  Which signal do we want to send?
+
+---
+
+> End of Sprint 06. Next entry: **Sprint 07 — Operational visibility (for real, this time, finally).**

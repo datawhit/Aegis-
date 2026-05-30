@@ -159,3 +159,40 @@ async def test_reviewer_cannot_rollback_anything(client, db_session) -> None:
         json={"reason": "no"},
     )
     assert response.status_code == 403
+
+
+async def test_rollback_denial_is_audited(client, db_session) -> None:
+    """R-21 mitigation: a denied rollback writes an audit entry so a manager
+    can see who attempted what."""
+    from sqlalchemy import select
+
+    from app.models.audit_log import AuditLog
+
+    _, access = await _make_user(db_session, UserRole.OPERATOR)
+    action = await _make_executed_action(db_session, RemediationActionClass.REVOKE_USER_SESSIONS)
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/v1/remediations/{action.id}/rollback",
+        headers={"Authorization": f"Bearer {access}"},
+        json={"reason": "trying anyway"},
+    )
+    assert response.status_code == 403
+
+    entries = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "remediation.rollback_denied",
+                    AuditLog.resource_id == action.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.payload["reason_code"] == "non_reversible_requires_admin"
+    assert entry.payload["actor_role"] == "operator"
+    assert entry.payload["action_class"] == "revoke_user_sessions"

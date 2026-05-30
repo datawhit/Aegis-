@@ -106,6 +106,16 @@ class Settings(BaseSettings):
     # after rotation. Suggested format: "aegis-audit-vYYYY-MM" or a UUID.
     audit_export_signing_key_id: str = "dev-unsigned"
 
+    # --- Audit key registry (Sprint 6, D-26/D-27) ---
+    # Path to a JSON file holding the multi-key registry:
+    #   {"keys": [{"key_id": "...", "status": "active|retired",
+    #              "public_pem": "...", "private_pem": "..."}]}
+    # Exactly one entry must be `active` — that's the signing key.
+    # `retired` entries keep their public_pem so verifiers can still check
+    # exports signed with old keys after rotation. When this path is unset
+    # the system falls back to single-key mode using `audit_export_signing_key`.
+    audit_key_registry_path: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
