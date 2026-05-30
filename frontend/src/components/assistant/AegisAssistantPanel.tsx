@@ -3,17 +3,20 @@ import { useMutation } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   chatWithAssistant,
+  getTranscript,
   type AssistantChatResponse,
   type AssistantSource,
 } from "@/lib/assistant";
 
 /**
  * Sprint 10: Aegis Assistant chat panel.
- *
- * Stateless on the server today — each turn is a fresh request. Local
- * client state holds the conversation so the operator sees the prior
- * exchange.
+ * Sprint 13: server-side conversation history. The panel remembers the
+ * active conversation_id in localStorage and loads its transcript on
+ * mount so refreshing the page doesn't lose context. Each new chat
+ * starts a new conversation (no auto-merge across visits).
  */
+
+const STORAGE_KEY = "aegis.assistant.conversation_id";
 
 type Turn =
   | { role: "user"; text: string }
@@ -35,11 +38,49 @@ const SUGGESTED_QUERIES = [
 export function AegisAssistantPanel() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
+  const [conversationId, setConversationId] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : window.localStorage.getItem(STORAGE_KEY),
+  );
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
+  // Sprint 13: rehydrate transcript on mount when we have a conversation_id
+  // saved from a prior visit.
+  useEffect(() => {
+    if (!conversationId) return;
+    let cancelled = false;
+    getTranscript(conversationId)
+      .then((t) => {
+        if (cancelled) return;
+        setTurns(
+          t.messages.map((m) =>
+            m.role === "user"
+              ? { role: "user" as const, text: m.content }
+              : {
+                  role: "assistant" as const,
+                  text: m.content,
+                  sources: m.sources,
+                  toolCalls: m.tool_calls,
+                },
+          ),
+        );
+      })
+      .catch(() => {
+        // Stored conversation_id was orphaned (DB wiped, different user).
+        window.localStorage.removeItem(STORAGE_KEY);
+        setConversationId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
+
   const mutation = useMutation({
-    mutationFn: (q: string) => chatWithAssistant(q),
+    mutationFn: (q: string) => chatWithAssistant(q, conversationId ?? undefined),
     onSuccess: (data: AssistantChatResponse) => {
+      if (!conversationId) {
+        setConversationId(data.conversation_id);
+        window.localStorage.setItem(STORAGE_KEY, data.conversation_id);
+      }
       setTurns((t) => [
         ...t,
         {
@@ -63,6 +104,13 @@ export function AegisAssistantPanel() {
     },
   });
 
+  const startNewConversation = () => {
+    setConversationId(null);
+    window.localStorage.removeItem(STORAGE_KEY);
+    setTurns([]);
+    setDraft("");
+  };
+
   useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
@@ -78,11 +126,22 @@ export function AegisAssistantPanel() {
 
   return (
     <section className="rounded-lg border border-aegis-accent/30 bg-aegis-panel p-4">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-aegis-text">Aegis Assistant</h2>
-        <span className="rounded border border-aegis-accent/40 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-aegis-accent">
-          beta
-        </span>
+        <div className="flex items-center gap-3">
+          {turns.length > 0 && (
+            <button
+              type="button"
+              onClick={startNewConversation}
+              className="font-mono text-[10px] uppercase tracking-widest text-aegis-muted hover:text-aegis-accent"
+            >
+              + new chat
+            </button>
+          )}
+          <span className="rounded border border-aegis-accent/40 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-aegis-accent">
+            beta
+          </span>
+        </div>
       </header>
       <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-aegis-muted">
         Ask Aegis anything about your security operations

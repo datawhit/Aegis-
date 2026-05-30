@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { getIncident } from "@/lib/incidents";
 import { rollbackRemediation } from "@/lib/approvals";
 import { SeverityBadge } from "@/components/incidents/SeverityBadge";
@@ -32,7 +32,28 @@ const TAB_LABELS: { id: Tab; label: string }[] = [
 ];
 export default function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [tab, setTab] = useState<Tab>("overview");
+  // Sprint 13: tab state lives in `?tab=…` so a Decision Record is
+  // deep-linkable (R-44). Falls back to "overview".
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab") as Tab | null;
+  const validTabs: Tab[] = [
+    "overview",
+    "ai_reasoning",
+    "risk_evidence",
+    "related_alerts",
+    "audit",
+  ];
+  const tab: Tab = tabFromUrl && validTabs.includes(tabFromUrl) ? tabFromUrl : "overview";
+  const setTab = (next: Tab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "overview") {
+      params.delete("tab");
+    } else {
+      params.set("tab", next);
+    }
+    setSearchParams(params, { replace: true });
+  };
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["incident", id],
     queryFn: () => getIncident(id!),

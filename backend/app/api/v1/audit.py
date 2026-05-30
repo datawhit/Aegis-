@@ -72,12 +72,17 @@ async def list_audit_logs(
     actor_type: str | None = Query(None),
     action: str | None = Query(None),
     resource_type: str | None = Query(None),
+    resource_id: str | None = Query(None),
 ) -> AuditLogPage:
     """Paginated read for the audit-chain explorer UI (Sprint 5).
 
     Ordering is newest-first by (created_at, id) — operators reading the
     log expect "what just happened" at the top. The verifier still walks
     the chain in ascending order; this endpoint is purely a UI surface.
+
+    Sprint 13 (D-72): `resource_id` filter is the back end of the
+    Decision Record's "Audit Trail" tab deep link
+    (`?resource_type=incident&resource_id=<uuid>`).
     """
     base = select(AuditLog)
     if actor_type is not None:
@@ -86,6 +91,14 @@ async def list_audit_logs(
         base = base.where(AuditLog.action == action)
     if resource_type is not None:
         base = base.where(AuditLog.resource_type == resource_type)
+    if resource_id is not None:
+        import uuid as _uuid
+
+        try:
+            base = base.where(AuditLog.resource_id == _uuid.UUID(resource_id))
+        except ValueError:
+            # Malformed UUID — return zero rows rather than 500.
+            base = base.where(AuditLog.id != AuditLog.id)
 
     total = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = (

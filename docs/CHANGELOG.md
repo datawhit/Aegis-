@@ -3493,3 +3493,265 @@ roll-up to specifics. That pattern wants to extend to:
 ---
 
 > End of Sprint 12. Next entry: **Sprint 13 — Assistant streaming + server-side history.**
+
+---
+
+## SPRINT 13 — CONVERSATIONAL ASSISTANT + DEEP-LINK POLISH
+
+- **DATE:** 2026-05-30
+- **STATUS:** Delivered. Awaiting review before Sprint 14 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Make the Assistant remember the conversation, and finish wiring the
+two deep links the prior sprints already had pointing somewhere
+(R-44, D-72).
+
+Streaming responses (the other half of Sprint 13's original scope) are
+pushed to Sprint 14 — server-side history is the higher-leverage half
+of the conversational-Assistant story.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **Server-side conversation history (D-59 / D-64).** Two new tables
+  via migration 0004:
+  - `assistant_conversations` — one row per chat thread, scoped to the
+    user (FK to `users.id` with `ON DELETE CASCADE`). Title is
+    auto-derived from the first user message (≤ 80 chars).
+  - `assistant_messages` — every turn in order, with `role`
+    (`user` | `assistant`), `content`, JSONB `sources` + `tool_calls`,
+    optional `model`. `created_at` uses `clock_timestamp()` so multiple
+    turns in one transaction don't share an instant (same rationale as
+    Sprint 03 / migration 0003).
+- **`POST /assistant/chat`** now accepts optional `conversation_id`.
+  Missing → new conversation created, id returned. Present → prior
+  transcript loaded, history passed as model context, user + assistant
+  turns persisted. Cross-user ids return 404.
+- **`GET /assistant/conversations`** — list the user's threads,
+  newest-updated first, with a `message_count` per thread.
+- **`GET /assistant/conversations/{id}`** — full transcript including
+  sources + tool_calls. Returns 404 if the conversation belongs to
+  another user.
+- **`AssistantService.chat(..., history=...)`** — accepts an
+  optional history list `[{role, content}]`. Prior tool-use blocks are
+  intentionally NOT replayed; only final text is carried as context.
+  Tools are re-runnable per turn.
+- **Frontend AegisAssistantPanel** persists `conversation_id` in
+  `localStorage`. On mount, if an id is present, it rehydrates the
+  transcript via `GET /assistant/conversations/{id}`. Orphaned ids
+  (different user, wiped DB) silently clear. "+ new chat" button
+  resets the conversation.
+- **Decision Record tab state in URL (R-44).** `?tab=ai_reasoning`
+  is now deep-linkable; refreshing or sharing a URL preserves the
+  active tab. Falls back to "overview" for unknown values.
+- **Audit-logs deep link from Decision Record (D-72).**
+  `GET /audit/logs` accepts `?resource_id=<uuid>`. The Decision
+  Record's Audit Trail tab links with both
+  `resource_type=incident&resource_id=…`, and the `AuditLogsPage`
+  reads those params on mount, syncs filter changes back to the
+  URL, and renders a "scoped to <type> <id>…" chip with a clear
+  affordance.
+
+Explicitly out of scope:
+
+- Streaming responses (D-60 / OQ-38) — Sprint 14.
+- Assistant rate limit + per-user budget cap (D-62 / OQ-39) —
+  Sprint 14.
+- KMS adapter (D-37) — Sprint 14+, Q32 still open.
+- Conversation list UI on the Assistant panel (the data is there;
+  surfacing a "your conversations" sidebar is Sprint 14).
+- Per-conversation rename / delete (Sprint 14 polish).
+
+### SECURITY CONSIDERATIONS
+
+- **Every conversation row is scoped to its owning user.** All three
+  endpoints filter `assistant_conversations.user_id ==
+  current_user.id`. Cross-user reads return 404, never another user's
+  transcript.
+- **The Assistant is still strictly read-only (ADR-023).** The new
+  tables are a transcript, not authorising state. Nothing in the
+  schema flips a switch elsewhere in the system.
+- **`resource_id` filter on `/audit/logs`** parses the parameter
+  through `uuid.UUID(...)` in Python before hitting the SQL — a
+  malformed value returns an empty result set, never 500.
+- **Cross-user conversation 404, not 403.** Operators shouldn't be
+  able to enumerate other users' conversation ids by probing 403 vs
+  404 differences.
+
+### ARCHITECTURAL DECISIONS
+
+No new ADRs — Sprint 13 builds on ADR-023 (Aegis Assistant: tool-use
+RAG, read-only) without changing the read-only invariant.
+
+### FEATURES IMPLEMENTED
+
+| Feature                                              | Status | Notes                                              |
+| ---------------------------------------------------- | ------ | -------------------------------------------------- |
+| `assistant_conversations` + `assistant_messages` tables | ✅  | Migration 0004; clock_timestamp ordering           |
+| `POST /assistant/chat` accepts `conversation_id`      | ✅     | Returns `conversation_id` for the client to remember |
+| `GET /assistant/conversations` (user-scoped list)     | ✅     | Newest-updated first, message_count per row        |
+| `GET /assistant/conversations/{id}` (transcript)      | ✅     | Includes sources + tool_calls per turn             |
+| Frontend rehydrates transcript from localStorage      | ✅     | Orphaned ids silently clear                         |
+| "+ new chat" button on AegisAssistantPanel            | ✅     |                                                    |
+| Decision Record `?tab=…` URL state (R-44)             | ✅     | Falls back to overview on unknown values            |
+| `/audit/logs?resource_id=<uuid>` filter (D-72)        | ✅     | Malformed uuid → empty result, never 500            |
+| AuditLogsPage seeds filters from URL + syncs back     | ✅     | "Scoped to <type> <id>…" chip with clear button     |
+| Tests: 5 cases (chat 503, user-scoping list, ordering, 404, audit filter) | ✅ | All against real DB |
+
+### FILES CREATED (4)
+
+- `backend/alembic/versions/0004_assistant_conversations.py`
+- `backend/app/models/assistant.py`
+- `backend/tests/test_assistant_conversations.py`
+
+### FILES MODIFIED (notable)
+
+- `backend/app/api/v1/assistant.py` — accept `conversation_id`,
+  persist user + assistant turns, list + transcript endpoints
+- `backend/app/api/v1/audit.py` — `resource_id` filter
+- `backend/app/core/ai/assistant.py` — `chat(..., history=...)`
+- `backend/app/models/__init__.py` — register new models
+- `frontend/src/lib/assistant.ts` — typed `conversation_id` path +
+  `listConversations` + `getTranscript`
+- `frontend/src/lib/auditLogs.ts` — `resource_id` filter
+- `frontend/src/components/assistant/AegisAssistantPanel.tsx` —
+  rehydrate from localStorage + "+ new chat"
+- `frontend/src/pages/IncidentDetailPage.tsx` — `useSearchParams`
+  for `?tab=…`
+- `frontend/src/pages/AuditLogsPage.tsx` — seed from URL, sync back,
+  scoped-filter chip
+- `docs/CHANGELOG.md` — this entry
+
+### DATABASE CHANGES
+
+Migration `0004_assistant_conversations`:
+
+- `assistant_conversations` (id UUID PK, user_id FK, title VARCHAR,
+  created_at, updated_at). Index `ix_assistant_conv_user_updated` on
+  `(user_id, updated_at)` for the list endpoint.
+- `assistant_messages` (id UUID PK, conversation_id FK, created_at
+  with `clock_timestamp()` default, role, content, sources JSONB,
+  tool_calls JSONB, model). Index `ix_assistant_msg_conv_created`
+  on `(conversation_id, created_at)` for the transcript endpoint.
+- `ON DELETE CASCADE` from conversations to messages.
+
+### API CHANGES
+
+| Method | Path                                              | Auth   | Description                                  |
+| ------ | ------------------------------------------------- | ------ | -------------------------------------------- |
+| POST   | `/api/v1/assistant/chat`                          | bearer | Body gains optional `conversation_id`; response gains `conversation_id` |
+| GET    | `/api/v1/assistant/conversations`                 | bearer | List of user's conversations (50 newest)     |
+| GET    | `/api/v1/assistant/conversations/{id}`            | bearer | Full transcript                              |
+| GET    | `/api/v1/audit/logs`                              | admin/reviewer | New `resource_id` query param         |
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                              | Owed-by Sprint |
+| ---- | ------------------------------------------------------------------------------------------------- | -------------- |
+| D-75 | No conversation list UI on the Assistant panel — data is there, just not surfaced                  | Sprint 14      |
+| D-76 | No per-conversation rename / delete                                                                | Sprint 14      |
+| D-77 | localStorage key `aegis.assistant.conversation_id` isn't user-scoped; switching users shares an id | Sprint 14      |
+| D-78 | `list_conversations` does N+1 (one count query per conversation) — refactor to a GROUP BY join     | Sprint 14      |
+| D-79 | `AuditLogsPage` URL sync uses `replace: true`; clearing all filters doesn't pop a history entry    | Sprint 14+     |
+| D-80 | Assistant conversation history sent to the model has no token-budget cap — long threads will spend more per turn | Sprint 14 |
+
+(Open from prior sprints: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40, D-43, D-45, D-47–D-74.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-46 | localStorage shared across users on the same browser leaks conversation_id (D-77)                      | Low        | Low      | Sprint 14 fix: include user id in the storage key                                |
+| R-47 | A long conversation accumulates tokens — eventually hits model context limit mid-turn                  | Medium     | Medium   | Sprint 14: trim oldest turns past a token budget (D-80)                          |
+| R-48 | Assistant transcript persists even when the model errors. The user message is recorded; the assistant reply isn't. | Medium | Low | Acceptable today — the operator can retry; the orphan user turn is informative   |
+
+### ROLLBACK STRATEGY
+
+- **Schema:** `alembic downgrade 0003_audit_logs_clock_timestamp`
+  drops both new tables (CASCADE on the FK), discarding all
+  conversation history.
+- **Endpoint:** removing `_resolve_conversation` + the two new
+  endpoints reverts to the Sprint-10 stateless chat. Frontend
+  gracefully falls back if `localStorage` is empty.
+- **Audit `resource_id` filter:** removing the `if resource_id is not
+  None:` block is a clean revert; the parameter is optional.
+- **Decision Record tabs:** restoring the prior `useState<Tab>` is a
+  4-line revert.
+
+### KNOWN LIMITATIONS
+
+1. **No streaming yet.** The chat still waits for the full model
+   response before rendering (D-60 / Sprint 14).
+2. **No rate limit.** A buggy client could blast `/chat` and accrue
+   real Anthropic cost (D-62 / Sprint 14).
+3. **No conversation list UI** in the panel — the endpoint exists
+   but isn't surfaced (D-75).
+4. **localStorage key isn't user-scoped** — switching accounts on
+   the same browser can mix conversation_ids (D-77).
+5. **No token budget** on the history we send to the model (D-80).
+   Long threads keep accruing cost per turn.
+
+### OBSERVABILITY (current state)
+
+- **Logs:** `assistant.chat.completed` (rounds + tool_calls) still
+  fires; conversation_id not yet logged. Sprint 14 wires it.
+- **Metrics:** OTel auto-instrumentation captures
+  `/assistant/conversations` and `/assistant/conversations/{id}`
+  routes automatically.
+- **Audit chain:** unchanged.
+
+### NEXT STEPS — Sprint 14 candidate scope
+
+Working title: **"Streaming + budget + KMS."**
+
+1. **Assistant streaming via SSE** (D-60 / OQ-38).
+2. **Per-user rate limit + daily budget cap** (D-62 / OQ-39).
+3. **User-scoped localStorage** (D-77, R-46) + conversation list
+   sidebar (D-75) + rename/delete (D-76).
+4. **History token-budget cap** (D-80 / R-47).
+5. **KMS adapter** (D-37) — Q32 needs a decision; default to
+   AWS KMS first if unanswered.
+
+Carry-over: D-7, D-22, D-23, D-25, D-29–D-31, D-33–D-36, D-37, D-40,
+D-43, D-45, D-47–D-80.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-45 | Conversation retention policy — keep forever, 90 days, until user deletes?                              | Sprint 14 |
+| OQ-46 | Should the Assistant respect the audit chain (i.e. write a `assistant.queried` audit entry per turn)?    | Sprint 14 |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 13 closeout
+
+### 1. The conversational Decision Record
+
+The Assistant + Decision Record + Audit Trail deep links now compose
+a single flow: "ask Aegis what it did → drill into the specific
+decision → drill into the audit trail." That's the whole product
+story in three clicks.
+
+- **Q48.** Do we ship a "session export" feature in Sprint 14 that
+  bundles {assistant transcript, linked Decision Records, scoped
+  audit-log slices} into a single signed download? Continues the
+  Sprint-4 signed-export wedge into the conversational layer.
+
+### 2. The conversation as evidence
+
+Persisted assistant transcripts could themselves become evidence —
+"the SOC asked the AI about this incident, here's what it said."
+
+- **Q49.** Should `assistant_messages` be included in the
+  `/audit/export` signed payload? Risks: conversations contain
+  free-form text that may include PII. Recommendation: **opt-in
+  per-tenant** in Sprint 14+; default off.
+
+---
+
+> End of Sprint 13. Next entry: **Sprint 14 — Streaming + budget + KMS.**

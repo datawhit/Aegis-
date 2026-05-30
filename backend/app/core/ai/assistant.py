@@ -426,13 +426,33 @@ class AssistantService:
         else:
             self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-    async def chat(self, session: AsyncSession, message: str) -> AssistantResponse:
+    async def chat(
+        self,
+        session: AsyncSession,
+        message: str,
+        *,
+        history: list[dict[str, str]] | None = None,
+    ) -> AssistantResponse:
+        """Single-turn chat. `history` is the prior transcript — caller
+        passes it in if they want context (server-side persistence is
+        managed by the endpoint, not the service).
+
+        Each entry in `history` is `{"role": "user"|"assistant", "content": str}`.
+        Tool-use blocks from prior turns are NOT replayed — only the
+        final text is carried as context. Tools are re-runnable per turn.
+        """
         if self._client is None:
             raise AssistantNotConfigured(
                 "Anthropic API key is not configured. Set AEGIS_ANTHROPIC_API_KEY."
             )
 
-        messages: list[dict[str, Any]] = [{"role": "user", "content": message}]
+        messages: list[dict[str, Any]] = []
+        for prior in history or []:
+            role = prior.get("role")
+            content = prior.get("content", "")
+            if role in {"user", "assistant"} and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": message})
         tool_results_log: list[tuple[str, dict[str, Any]]] = []
 
         for round_idx in range(_MAX_TOOL_ROUNDS):

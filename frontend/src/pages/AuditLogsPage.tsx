@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   exportSignedAudit,
@@ -20,11 +21,33 @@ const actorColor: Record<string, string> = {
 };
 
 export default function AuditLogsPage() {
-  const [filters, setFilters] = useState<AuditLogFilters>({
+  // Sprint 13 (D-72): seed filters from URL query params so deep links
+  // from the Decision Record's Audit Trail tab pre-filter the view.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [filters, setFilters] = useState<AuditLogFilters>(() => ({
     limit: PAGE_SIZE,
     offset: 0,
-  });
+    actor_type: searchParams.get("actor_type") || undefined,
+    action: searchParams.get("action") || undefined,
+    resource_type: searchParams.get("resource_type") || undefined,
+    resource_id: searchParams.get("resource_id") || undefined,
+  }));
   const [selected, setSelected] = useState<AuditLogEntry | null>(null);
+
+  // Keep URL in sync with filters so back/refresh round-trips work.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    for (const [k, v] of Object.entries({
+      actor_type: filters.actor_type,
+      action: filters.action,
+      resource_type: filters.resource_type,
+      resource_id: filters.resource_id,
+    })) {
+      if (v) next.set(k, v);
+    }
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.actor_type, filters.action, filters.resource_type, filters.resource_id]);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["auditLogs", filters],
@@ -67,6 +90,20 @@ export default function AuditLogsPage() {
           </button>
         </div>
       </header>
+
+      {filters.resource_id && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded border border-aegis-accent/40 bg-aegis-accent/5 px-3 py-2 font-mono text-xs text-aegis-accent">
+          <span>scoped to {filters.resource_type ?? "resource"}</span>
+          <code className="text-aegis-text">{filters.resource_id.slice(0, 8)}…</code>
+          <button
+            type="button"
+            onClick={() => setFilter({ resource_id: undefined, resource_type: undefined })}
+            className="ml-auto text-aegis-muted hover:text-aegis-danger"
+          >
+            clear filter
+          </button>
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-3 rounded border border-aegis-border bg-aegis-panel p-3">
         <FilterField label="actor type">

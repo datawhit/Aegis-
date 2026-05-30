@@ -28,6 +28,7 @@ export type AuditLogFilters = {
   actor_type?: string;
   action?: string;
   resource_type?: string;
+  resource_id?: string;
 };
 
 export async function listAuditLogs(
@@ -40,6 +41,7 @@ export async function listAuditLogs(
       actor_type: filters.actor_type || undefined,
       action: filters.action || undefined,
       resource_type: filters.resource_type || undefined,
+      resource_id: filters.resource_id || undefined,
     },
   });
   return data;
