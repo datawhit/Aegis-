@@ -124,19 +124,21 @@ export default function AuditLogsPage() {
               key={entry.id}
               type="button"
               onClick={() => setSelected(entry)}
-              className={`grid w-full grid-cols-[80px_120px_1fr] items-baseline gap-3 border-b border-aegis-border px-4 py-2 text-left last:border-b-0 hover:bg-aegis-bg/40 ${
+              className={`flex w-full flex-col gap-1 border-b border-aegis-border px-4 py-2 text-left last:border-b-0 hover:bg-aegis-bg/40 sm:grid sm:grid-cols-[80px_1fr_auto] sm:items-baseline sm:gap-3 ${
                 selected?.id === entry.id ? "bg-aegis-bg/60" : ""
               }`}
             >
-              <span
-                className={`font-mono text-[10px] uppercase ${actorColor[entry.actor_type] ?? ""}`}
-              >
-                {entry.actor_type}
-              </span>
-              <span className="font-mono text-xs text-aegis-text">
-                {entry.action}
-              </span>
-              <span className="text-right font-mono text-[10px] text-aegis-muted">
+              <div className="flex items-baseline gap-3 sm:contents">
+                <span
+                  className={`font-mono text-[10px] uppercase ${actorColor[entry.actor_type] ?? ""}`}
+                >
+                  {entry.actor_type}
+                </span>
+                <span className="break-all font-mono text-xs text-aegis-text">
+                  {entry.action}
+                </span>
+              </div>
+              <span className="font-mono text-[10px] text-aegis-muted sm:text-right">
                 {new Date(entry.created_at).toLocaleString()}
               </span>
             </button>

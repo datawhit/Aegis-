@@ -13,8 +13,26 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 
 from app.config import settings
+
+
+@worker_process_init.connect
+def _init_worker_telemetry(**_kwargs: object) -> None:
+    """Configure OTel inside each Celery worker process.
+
+    The FastAPI lifespan hook handles the web app, but workers are a
+    separate process tree — they need their own setup. Skipped when
+    AEGIS_OTEL_ENABLED=false. Pass a None app since the Celery
+    instrumentation is global.
+    """
+    if not settings.otel_enabled:
+        return
+    from app.telemetry import configure_telemetry
+
+    configure_telemetry(None)
+
 
 celery_app = Celery(
     "aegis",

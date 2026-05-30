@@ -47,6 +47,9 @@ async def test_well_known_returns_public_keys(
     assert ids["active-key"]["public_pem"] == pub_active
     assert "private_pem" not in ids["active-key"]
     assert "private_pem" not in ids["retired-key"]
+    # D-41: response is cacheable so downstream CDNs/proxies don't
+    # hammer the app for what is effectively static-per-rotation data.
+    assert "max-age" in response.headers.get("cache-control", "")
 
 
 async def test_well_known_requires_no_auth(client, monkeypatch: pytest.MonkeyPatch) -> None:

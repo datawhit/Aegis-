@@ -106,6 +106,15 @@ class Settings(BaseSettings):
     # after rotation. Suggested format: "aegis-audit-vYYYY-MM" or a UUID.
     audit_export_signing_key_id: str = "dev-unsigned"
 
+    # --- Observability / OpenTelemetry (Sprint 7, D-3) ---
+    # When enabled, traces + metrics export over OTLP/gRPC to the
+    # `otel-collector` container (see docker-compose). Disabled in tests
+    # so the FastAPI app can be re-instrumented per test loop without
+    # the OTel state machine complaining.
+    otel_enabled: bool = False
+    otel_endpoint: str = "http://otel-collector:4317"
+    otel_service_name: str = "aegis-backend"
+
     # --- Audit key registry (Sprint 6, D-26/D-27) ---
     # Path to a JSON file holding the multi-key registry:
     #   {"keys": [{"key_id": "...", "status": "active|retired",

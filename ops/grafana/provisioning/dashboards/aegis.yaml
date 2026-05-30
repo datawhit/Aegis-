@@ -1,0 +1,13 @@
+# Auto-provisioned dashboard loader (Sprint 7). All JSON in
+# /var/lib/grafana/dashboards is imported under the "Aegis" folder.
+apiVersion: 1
+
+providers:
+  - name: aegis
+    orgId: 1
+    folder: Aegis
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

@@ -40,6 +40,18 @@ dependencies = [
 
     # --- Observability ---
     "structlog==24.4.0",
+    # OpenTelemetry (Sprint 7, closes D-3). SDK + four instrumentations
+    # (FastAPI, SQLAlchemy, httpx, Celery). All export to OTLP; the
+    # otel-collector container picks up + fans out (Prometheus today,
+    # Tempo/Jaeger later). Pinned to 1.29 / 0.50b0 — earlier 0.48b0 still
+    # imported `pkg_resources`, which setuptools 80+ removed.
+    "opentelemetry-api==1.29.0",
+    "opentelemetry-sdk==1.29.0",
+    "opentelemetry-exporter-otlp-proto-grpc==1.29.0",
+    "opentelemetry-instrumentation-fastapi==0.50b0",
+    "opentelemetry-instrumentation-sqlalchemy==0.50b0",
+    "opentelemetry-instrumentation-httpx==0.50b0",
+    "opentelemetry-instrumentation-celery==0.50b0",
 
     # --- AI providers ---
     "anthropic==0.39.0",

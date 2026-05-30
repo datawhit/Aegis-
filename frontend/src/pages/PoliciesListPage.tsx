@@ -60,23 +60,27 @@ export default function PoliciesListPage() {
           <Link
             key={p.id}
             to={`/policies/${p.id}`}
-            className="grid grid-cols-[60px_100px_1fr_120px_60px] items-center gap-4 border-b border-aegis-border px-4 py-3 last:border-b-0 hover:bg-aegis-bg/40"
+            className="flex flex-col gap-1 border-b border-aegis-border px-4 py-3 last:border-b-0 hover:bg-aegis-bg/40 sm:grid sm:grid-cols-[60px_100px_1fr_120px_80px] sm:items-center sm:gap-4"
           >
-            <span className="font-mono text-xs text-aegis-muted">
-              #{p.priority}
-            </span>
-            <span
-              className={`font-mono text-xs uppercase tracking-widest ${effectColor[p.effect]}`}
-            >
-              {p.effect}
-            </span>
+            <div className="flex items-center gap-3 sm:contents">
+              <span className="font-mono text-xs text-aegis-muted">
+                #{p.priority}
+              </span>
+              <span
+                className={`font-mono text-xs uppercase tracking-widest ${effectColor[p.effect]}`}
+              >
+                {p.effect}
+              </span>
+            </div>
             <span className="text-sm text-aegis-text">{p.name}</span>
-            <span className="font-mono text-[10px] text-aegis-muted">
-              {p.is_active ? "active" : "disabled"}
-            </span>
-            <span className="text-right font-mono text-[10px] text-aegis-muted">
-              {new Date(p.updated_at).toLocaleDateString()}
-            </span>
+            <div className="flex items-center justify-between sm:contents">
+              <span className="font-mono text-[10px] text-aegis-muted">
+                {p.is_active ? "active" : "disabled"}
+              </span>
+              <span className="font-mono text-[10px] text-aegis-muted sm:text-right">
+                {new Date(p.updated_at).toLocaleDateString()}
+              </span>
+            </div>
           </Link>
         ))}
       </div>

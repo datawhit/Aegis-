@@ -1979,3 +1979,267 @@ chasing in 2026 H2.
 ---
 
 > End of Sprint 06. Next entry: **Sprint 07 — Operational visibility (for real, this time, finally).**
+
+---
+
+## SPRINT 07 — OPERATIONAL VISIBILITY (FOR REAL, FINALLY)
+
+- **DATE:** 2026-05-29
+- **STATUS:** Delivered. Awaiting review before Sprint 8 kickoff.
+- **DURATION:** 1 day
+- **OWNER:** Principal Architect (claude-opus-4-7)
+
+### SPRINT OBJECTIVE
+
+Close D-3 — the OpenTelemetry collector + Grafana dashboards that
+ADR-001 deferred from Phase 0 and that every subsequent sprint
+carried forward. Six sprints of behavior is enough; staying blind to
+request rate / latency / DB cost / error rate is no longer the right
+tradeoff.
+
+Also: ship the small follow-ups left dangling from Sprint 6
+(boot-time registry validation, well-known cacheability) and the
+mobile-responsive layout pass deferred from Sprint 5. Three medium
+items + two small wins is the right scope for a sprint that lands
+real infra.
+
+### TECHNICAL SCOPE
+
+In scope:
+
+- **OTel SDK + auto-instrumentation** (ADR-020, D-3). FastAPI,
+  SQLAlchemy (against `engine.sync_engine`), httpx, and Celery emit
+  traces + metrics over OTLP/gRPC. New module
+  `app/telemetry.py` is the single entry point; called from FastAPI
+  lifespan AND from the Celery `worker_process_init` signal.
+  Disabled by default in tests (`AEGIS_OTEL_ENABLED=false`).
+- **Observability containers** in docker-compose: `otel-collector`
+  (`otel/opentelemetry-collector-contrib:0.110.0`), `prometheus`
+  (`prom/prometheus:v2.55.0`), `grafana` (`grafana/grafana:11.3.0`).
+  Health-check noise filtered at the collector. Prometheus retention
+  capped at 24h for the local stack.
+- **Auto-provisioned Grafana** — data source pointing at Prometheus,
+  one dashboard ("Aegis — Overview") with 4 panels: request rate by
+  route, p50/p95 latency, 4xx/5xx error rate, DB ops/sec. Dashboard
+  JSON lives in the repo so it's reviewable + diffable.
+- **Mobile layout pass** (D-32). AppShell collapses sign-out into the
+  header bar on narrow screens, nav links wrap; PoliciesListPage row
+  grid stacks vertically below `sm`; PolicyDetailPage 3-col grid
+  becomes 1-col; AuditLogsPage row stacks. Tested in the running
+  Vite dev server at 375px / 768px / desktop widths.
+- **Boot-time audit-key registry validation** (D-38). FastAPI
+  lifespan loads the registry on startup; in `staging`/`prod` a
+  malformed/missing registry raises and refuses to start (fail-loud).
+  In `local`/`ci`/`dev` it logs a warning and continues, so dev still
+  works without configured keys.
+- **`Cache-Control: public, max-age=3600, must-revalidate` on
+  `/.well-known/aegis-audit-public-key`** (D-41). Public keys rotate
+  on the order of months; caching aggressively at downstream
+  proxies/CDNs keeps load off the app.
+
+Explicitly out of scope:
+
+- KMS adapter (AWS KMS / GCP KMS / Vault) for the signing private
+  key — D-37, Sprint 8+.
+- Tempo / Jaeger for traces — collector currently logs traces to
+  stdout. Sprint 8.
+- Loki for log aggregation. Sprint 8+.
+- Verifier CLI `--server-url` flag — D-39, Sprint 8.
+- Real Okta SSO — still stubbed; the SSO sprint is its own thing.
+- Second execution connector (Okta or CrowdStrike) — OQ-13.
+
+### SECURITY CONSIDERATIONS
+
+- **Health endpoints are excluded** from FastAPI instrumentation so
+  the metrics aren't dominated by liveness pings.
+- **OTLP endpoint defaults to insecure gRPC** because the collector
+  is on the same Docker network. Production deployments must override
+  via `AEGIS_OTEL_ENDPOINT` to use TLS or set up the network so the
+  insecure channel can't escape the cluster.
+- **Boot-time validation refuses to start the app in prod** if the
+  signing key registry is missing or malformed. Prior behavior would
+  defer the failure to the first audit-export request.
+- **Cache-Control includes `must-revalidate`** so a key rotation
+  isn't stuck for an hour: clients with a fresh response may serve
+  cached, but stale responses must revalidate.
+
+### ARCHITECTURAL DECISIONS
+
+- **ADR-020** OpenTelemetry via collector + Prometheus, dashboards in
+  Grafana
+
+### FEATURES IMPLEMENTED
+
+| Feature                                          | Status | Notes                                              |
+| ------------------------------------------------ | ------ | -------------------------------------------------- |
+| OTel collector container                          | ✅     | OTLP gRPC :4317 + HTTP :4318 + Prom exporter :8889 |
+| Prometheus container                              | ✅     | Scrapes collector :8889; 24h retention             |
+| Grafana container w/ admin user                   | ✅     | Anonymous Viewer for local dev                     |
+| Auto-provisioned Prometheus data source           | ✅     |                                                    |
+| Auto-loaded "Aegis — Overview" dashboard          | ✅     | 4 panels: rate, p50/p95, error rate, DB ops/sec    |
+| `app/telemetry.py` bootstrap                      | ✅     | Single entry point; idempotent                     |
+| FastAPI auto-instrumentation                      | ✅     | Health endpoints excluded                          |
+| SQLAlchemy auto-instrumentation                   | ✅     | Against `engine.sync_engine`                       |
+| httpx auto-instrumentation                        | ✅     | Outbound (MS Graph, Slack)                         |
+| Celery auto-instrumentation                       | ✅     | Worker process init signal                         |
+| `AEGIS_OTEL_ENABLED` toggle                       | ✅     | Default false (tests stay quiet)                   |
+| Mobile layout: AppShell                           | ✅     | Sign-out moves inline; nav wraps                    |
+| Mobile layout: PoliciesListPage                   | ✅     | Row grid stacks below `sm`                          |
+| Mobile layout: PolicyDetailPage                   | ✅     | 3-col → 1-col                                       |
+| Mobile layout: AuditLogsPage                      | ✅     | Row stacks; detail pane already lg-only             |
+| Boot-time registry validation                     | ✅     | Hard-fail in prod, warn in dev                      |
+| Cache-Control on /.well-known                     | ✅     | `public, max-age=3600, must-revalidate`             |
+| Test: Cache-Control assertion                     | ✅     |                                                    |
+
+### FILES CREATED (8)
+
+- `backend/app/telemetry.py`
+- `ops/otel/otel-collector-config.yaml`
+- `ops/prometheus/prometheus.yml`
+- `ops/grafana/provisioning/datasources/prometheus.yaml`
+- `ops/grafana/provisioning/dashboards/aegis.yaml`
+- `ops/grafana/dashboards/aegis-overview.json`
+
+### FILES MODIFIED (notable)
+
+- `backend/pyproject.toml` — OTel deps (SDK + 4 instrumentations,
+  pinned to 1.29 / 0.50b0 because 0.48b0 still imports the removed
+  `pkg_resources`)
+- `backend/app/config.py` — `otel_enabled`, `otel_endpoint`,
+  `otel_service_name`
+- `backend/app/main.py` — call `configure_telemetry()` in lifespan;
+  boot-time registry load
+- `backend/app/workers/celery_app.py` — `worker_process_init` hook
+  initialises telemetry in each worker process
+- `backend/app/api/well_known.py` — Cache-Control header
+- `backend/tests/test_well_known.py` — Cache-Control assertion
+- `frontend/src/components/layout/AppShell.tsx` — mobile-responsive nav
+- `frontend/src/pages/PoliciesListPage.tsx` — row stacks on mobile
+- `frontend/src/pages/PolicyDetailPage.tsx` — 3-col → 1-col mobile
+- `frontend/src/pages/AuditLogsPage.tsx` — row stacks on mobile
+- `docker-compose.yml` — three new services + two new volumes
+- `.env.example` — OTel env vars documented
+- `docs/DECISIONS.md` — ADR-020
+
+### DATABASE CHANGES
+
+**None.**
+
+### API CHANGES
+
+| Method | Path                                       | Auth | Description                                       |
+| ------ | ------------------------------------------ | ---- | ------------------------------------------------- |
+| GET    | `/.well-known/aegis-audit-public-key`      | none | Now sets `Cache-Control: public, max-age=3600, must-revalidate` |
+
+No new endpoints; OTel instrumentation is transparent to API consumers.
+
+### TECHNICAL DEBT INTRODUCED
+
+| ID   | Item                                                                                            | Owed-by Sprint |
+| ---- | ----------------------------------------------------------------------------------------------- | -------------- |
+| D-42 | Traces export to stdout only — no Tempo/Jaeger UI for trace exploration                          | Sprint 8       |
+| D-43 | No log aggregation (Loki) yet — operators still grep container logs                              | Sprint 8+      |
+| D-44 | Dashboard JSON is a starter (4 panels) — needs panels for audit-chain activity, policy effect distribution, AI cost per tenant | Sprint 8+ |
+| D-45 | OTel insecure gRPC is fine inside Docker network; prod deploys must override AEGIS_OTEL_ENDPOINT to TLS | Sprint 8 |
+| D-46 | No alerting wired (Alertmanager or Grafana alerts) — dashboards are visual-only                  | Sprint 8+      |
+
+(Open from prior sprints: D-7, D-22, D-23, D-25, D-29, D-30, D-31, D-33, D-34, D-35, D-36, D-37, D-39, D-40.)
+
+### RISKS IDENTIFIED
+
+| ID   | Risk                                                                                                  | Likelihood | Impact   | Mitigation                                                                       |
+| ---- | ----------------------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------- |
+| R-29 | Collector container OOMs under burst load → metrics drop silently                                       | Low        | Medium   | Add a memory_limiter processor in Sprint 8                                       |
+| R-30 | A future sprint upgrades setuptools and breaks `pkg_resources`-using instrumentations again            | Low        | Medium   | Pin OTel >= 1.29 / 0.50b0 — version pin is the documentation                     |
+| R-31 | Mobile pass doesn't cover the LoginPage / AppShell drawer — operators on phones still see desktop login | Medium     | Low      | LoginPage is rarely used on mobile; address if signal arrives                    |
+
+### ROLLBACK STRATEGY
+
+- **OTel:** set `AEGIS_OTEL_ENABLED=false` (the default) and remove
+  the three observability containers from compose. Application
+  behavior is unchanged.
+- **Mobile pass:** Tailwind responsive classes are additive; reverting
+  individual files is safe.
+- **Boot-time validation:** the new lifespan block raises only in
+  `is_production`; flipping `AEGIS_ENV` to `local` bypasses it.
+
+### KNOWN LIMITATIONS
+
+1. **Traces go to stdout.** Grafana shows metrics only; trace
+   exploration UI lands in Sprint 8 (Tempo or Jaeger).
+2. **Starter dashboard.** Four panels cover the basics; richer
+   per-feature dashboards (audit-chain activity, policy effect
+   distribution, AI cost per tenant) are D-44.
+3. **No alerts.** Dashboards are visual-only; Sprint 8 wires
+   Alertmanager or Grafana alerts.
+4. **Health endpoints excluded** from metrics — intentional, but
+   means "is liveness flaking" needs a different signal.
+5. **Mobile layout doesn't include LoginPage.** R-31.
+
+### OBSERVABILITY (current state)
+
+- **Logs:** structlog → stdout, JSON in non-local, console in local.
+  Unchanged.
+- **Metrics:** OTel → Prometheus → Grafana. Live.
+- **Traces:** OTel → collector → stdout. Visible via `docker logs
+  aegis-otel-collector`.
+- **Audit chain:** unchanged.
+- **Alerting:** none yet.
+
+### NEXT STEPS — Sprint 08 candidate scope
+
+Working title: **"Trace exploration + alerting."**
+
+1. **Tempo or Jaeger** for trace storage + UI (D-42).
+2. **Grafana alerts or Alertmanager** for the high-leverage signals
+   (5xx burst, p95 over SLO, broker queue depth) (D-46).
+3. **Verifier CLI `--server-url`** to bootstrap public keys from
+   `/.well-known` (D-39).
+4. **KMS adapter** — pick AWS KMS or Vault per OQ-25 / Q32 (D-37).
+5. **Richer dashboards** — audit-chain activity, policy effect
+   distribution, AI cost per tenant (D-44).
+
+Carry-over: D-7, D-22, D-23, D-25, D-29, D-30, D-31, D-33, D-34, D-35,
+D-36, D-40, D-42–D-46.
+
+### OPEN QUESTIONS
+
+| ID    | Question                                                                                                | Needed by |
+| ----- | ------------------------------------------------------------------------------------------------------- | --------- |
+| OQ-28 | Trace backend: Tempo (Grafana-native, simpler) or Jaeger (more mature ecosystem)?                       | Sprint 8  |
+| OQ-29 | Alerting: Grafana managed alerts (simpler) or Alertmanager + Prometheus rules (more flexible routing)?   | Sprint 8  |
+| OQ-30 | Should the OTel collector also receive log signals (so structlog → OTLP → collector → wherever), or keep logs separate? | Sprint 8 |
+
+---
+
+## STRATEGIC PRODUCT QUESTIONS — Sprint 07 closeout
+
+### 1. Observability as a customer-visible feature
+
+Sprint 7 wires internal OTel + Grafana for the operator running Aegis.
+But the same telemetry pipeline could expose customer-scoped dashboards
+("your tenant's AI cost this month, your incidents resolved, your
+analyst MTTR").
+
+- **Q33.** Do we surface a *customer-facing* Grafana (or embedded
+  dashboard widgets) as part of the Phase 3+ commercial product, or
+  keep observability operator-only? Customer-facing observability is
+  a differentiator vs. SOAR incumbents who hide their internal
+  state, but it shifts the support load and the SLOs we publicly
+  commit to.
+
+### 2. The cost story for AI-heavy workloads
+
+The new dashboard surfaces request rate but not yet AI cost (D-44).
+The per-tenant AI budget cap (D-23) has been carried since Sprint 1.
+Both land in Sprint 8 or 9.
+
+- **Q34.** When we surface AI cost per tenant in Grafana, do we
+  also surface it *in the customer's tenant view* (Q33 reprise) so
+  buyers can see the cost they're driving? This makes pricing
+  conversations easier in renewals and harder in initial sales —
+  pick a frame.
+
+---
+
+> End of Sprint 07. Next entry: **Sprint 08 — Trace exploration + alerting.**

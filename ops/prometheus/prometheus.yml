@@ -1,0 +1,21 @@
+# Prometheus scrape config — Sprint 7.
+#
+# Single scrape target: the OTel collector's Prometheus exporter, which
+# fronts FastAPI/SQLAlchemy/Celery/httpx instrumentation. As we add
+# more telemetry sources (e.g., a sidecar that reads Postgres stats),
+# add scrape jobs here.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+    metric_relabel_configs:
+      # OTel exporter prefixes all metrics with `otelcol_` for its own
+      # internal stats. Drop them — they're noise in the app dashboards.
+      - source_labels: [__name__]
+        regex: 'otelcol_.*'
+        action: drop

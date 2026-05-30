@@ -11,15 +11,21 @@ later: drop another route into this module.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from app.core.audit.key_registry import KeyRegistryError, load_registry
 
 router = APIRouter()
 
+# D-41: public keys rotate on the order of months. Cache aggressively
+# at downstream proxies/CDNs to keep load off the app for what is
+# effectively static-per-rotation data. `public` so shared caches cache;
+# `must-revalidate` so a rotation isn't stuck for a full day.
+_CACHE_HEADER = "public, max-age=3600, must-revalidate"
+
 
 @router.get("/.well-known/aegis-audit-public-key")
-async def audit_public_key_registry() -> dict:
+async def audit_public_key_registry(response: Response) -> dict:
     """Return the public view of the audit-export signing key registry.
 
     Shape:
@@ -40,4 +46,5 @@ async def audit_public_key_registry() -> dict:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+    response.headers["Cache-Control"] = _CACHE_HEADER
     return {"keys": registry.public_view()}

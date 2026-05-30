@@ -1,7 +1,8 @@
 # =============================================================================
 # Aegis — local development stack
-# Phase 0: Postgres+pgvector, Redis, FastAPI, Celery worker, Vite frontend.
-# Deferred: Temporal, LocalStack, OTel collector, Grafana/Loki (Sprint 3+).
+# Phase 0:  Postgres+pgvector, Redis, FastAPI, Celery worker, Vite frontend.
+# Sprint 7: OTel collector + Prometheus + Grafana (D-3, finally landed).
+# Deferred: Temporal, LocalStack, Loki (Sprint 8+).
 # =============================================================================
 
 name: aegis
@@ -95,6 +96,59 @@ services:
       - /app/node_modules
     command: npm run dev -- --host 0.0.0.0
 
+  # --- Observability stack (Sprint 7) -------------------------------------
+  #
+  # otel-collector receives OTLP traces + metrics from the backend over gRPC
+  # on :4317. It exports metrics in Prometheus format on :8889 (scraped by
+  # Prometheus below) and writes traces to stdout for now (Tempo/Jaeger is
+  # Sprint 8+).
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    container_name: aegis-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-config.yaml"]
+    volumes:
+      - ./ops/otel/otel-collector-config.yaml:/etc/otelcol-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: aegis-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=24h   # local dev: small footprint
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: aegis-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin    # local-only; rotate in real envs
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
 volumes:
   postgres-data:
   redis-data:
+  prometheus-data:
+  grafana-data:

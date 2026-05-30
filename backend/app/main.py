@@ -13,17 +13,42 @@ from app.api.v1.router import api_router
 from app.api.well_known import router as well_known_router
 from app.config import settings
 from app.logging import configure_logging, get_logger
+from app.telemetry import configure_telemetry
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app_: FastAPI) -> AsyncIterator[None]:
     configure_logging()
+    configure_telemetry(app_)
     log = get_logger("app.startup")
+
+    # D-38: boot-time validation of the audit signing key registry. Catches
+    # a malformed registry file before the first audit-export request
+    # would surface it as a 503. In non-production, log + continue so
+    # local dev can still run without any signing key configured.
+    from app.core.audit.key_registry import KeyRegistryError, load_registry
+
+    try:
+        reg = load_registry()
+        log.info(
+            "audit.key_registry.loaded",
+            active_key_id=reg.active().key_id,
+            total_keys=len(reg.entries),
+        )
+    except KeyRegistryError as exc:
+        if settings.is_production:
+            log.error("audit.key_registry.invalid", error=str(exc))
+            raise RuntimeError(
+                f"Refusing to start in {settings.env}: audit signing key not configured ({exc})"
+            ) from exc
+        log.warning("audit.key_registry.unconfigured", error=str(exc))
+
     log.info(
         "aegis.startup",
         env=settings.env,
         version=__version__,
         identity_provider=settings.identity_provider,
+        otel_enabled=settings.otel_enabled,
     )
     yield
     log.info("aegis.shutdown")

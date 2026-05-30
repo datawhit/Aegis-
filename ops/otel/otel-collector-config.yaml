@@ -1,0 +1,48 @@
+# OpenTelemetry Collector — local dev config (Sprint 7).
+#
+# Pipeline:
+#   FastAPI / Celery / SQLAlchemy / httpx → OTLP gRPC :4317 → collector
+#   → metrics: Prometheus exporter :8889 (scraped by Prometheus)
+#   → traces:  stdout logging (Tempo/Jaeger lands in a later sprint)
+#
+# Why no Jaeger/Tempo today: shipping the metric pipeline + dashboards is
+# the higher-leverage half of D-3 (5-sprint deferral). Traces visible via
+# `docker logs aegis-otel-collector` while a richer backend lands later.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  # Drop request paths that bury the dashboards in noise.
+  filter/healthchecks:
+    metrics:
+      datapoint:
+        - 'IsMatch(attributes["http.target"], "/api/v1/(health|ready)")'
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Resource attrs (service.name etc.) become Prometheus labels.
+    resource_to_telemetry_conversion:
+      enabled: true
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [filter/healthchecks, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

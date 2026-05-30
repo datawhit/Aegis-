@@ -523,6 +523,45 @@
 
 ---
 
+## ADR-020 — OpenTelemetry via collector + Prometheus, dashboards in Grafana
+
+- **Date:** 2026-05-29 (Sprint 07)
+- **Status:** Accepted; closes D-3 after 5 sprints of deferral
+- **Context:** Phase 0 deferred OTel/Grafana per ADR-001 to keep the
+  scaffold lean. D-3 has been carried forward every sprint since. With
+  six sprints of behaviour to instrument, the cost of staying blind to
+  request rate / latency / error rate / DB query cost is now larger
+  than the cost of standing up the stack.
+- **Decision:** Adopt the OpenTelemetry SDK + four
+  auto-instrumentations (FastAPI, SQLAlchemy, httpx, Celery). Export
+  OTLP/gRPC to an `otel-collector` container which fans out metrics to
+  Prometheus (scraped over its Prometheus exporter port) and traces
+  to stdout for now. Grafana auto-provisions a Prometheus data source
+  and an "Aegis — Overview" dashboard (request rate by route, p50/p95
+  latency, error rate, DB ops/sec).
+- **Why this shape:**
+  - Collector-first rather than direct-to-Prometheus so swapping
+    backends (Tempo, Honeycomb, Datadog) is a config change, not a
+    code change.
+  - Auto-instrumentation over manual spans for the first cut — the
+    leverage is high and the code churn is zero.
+  - Prometheus exporter on the collector rather than running
+    Prometheus's OTLP receiver: simpler, well-trodden, lets us keep
+    metrics scoped exactly to what we want.
+- **Disabled by default in tests** (`AEGIS_OTEL_ENABLED=false`). The
+  FastAPI instrumentor doesn't tolerate re-instrumenting an app
+  multiple times across pytest-asyncio loops, and the test
+  Postgres+Redis are local. Production env enables.
+- **Consequences:**
+  - + Operators see what the system does without scraping app logs.
+  - + Dashboard JSON ships in the repo (`ops/grafana/dashboards/`),
+    not click-built.
+  - – Worker startup is slower (instrumentor adds ~100ms).
+  - – Tempo/Jaeger not wired yet — traces visible via
+    `docker logs aegis-otel-collector` until Sprint 8.
+
+---
+
 ## ADR template (for future ADRs)
 
 ```
