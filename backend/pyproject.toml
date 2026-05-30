@@ -30,6 +30,13 @@ dependencies = [
     # --- Auth ---
     "python-jose[cryptography]==3.3.0",
     "passlib[bcrypt]==1.7.4",
+    # Pin bcrypt below 4.1 — passlib 1.7.4's bcrypt backend probes for
+    # version via `bcrypt.__about__`, which was removed in 4.1+. Without
+    # this pin, every hash_password() / verify_password() raises
+    # `ValueError: password cannot be longer than 72 bytes` regardless of
+    # input length, because passlib's backend init fails silently and the
+    # call falls back to raw bcrypt with the wrong argument shape.
+    "bcrypt==4.0.1",
 
     # --- Observability ---
     "structlog==24.4.0",
@@ -103,5 +110,12 @@ ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Pin fixture loop scope to "function" so the db_session fixture, the
+# client fixture (which depends on db_session), and the test function
+# all share one event loop. Without this, pytest-asyncio 0.24+ may run
+# the fixture and the test on different loops — which surfaces as
+# "Future attached to a different loop" once an async connection is
+# created in setup and awaited inside the test.
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-ra"
