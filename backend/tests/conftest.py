@@ -35,7 +35,15 @@ async def db_session() -> AsyncIterator[AsyncSession]:
     Uses the app's actual engine (so we hit the same migrated schema CI
     set up). The `BEGIN`/`ROLLBACK` pattern means each test starts clean
     without per-test `truncate` calls.
+
+    Note: `engine.dispose()` runs at the top of every test. The app's
+    async engine has a connection pool, but pytest-asyncio uses a fresh
+    event loop per test function — a connection cached on the previous
+    test's loop blows up with "Future attached to a different loop" when
+    the next test tries to use it. Disposing here forces a clean pool
+    bound to the current loop.
     """
+    await engine.dispose()
     connection = await engine.connect()
     transaction = await connection.begin()
     # join_transaction_mode="create_savepoint" makes each session-level
