@@ -232,9 +232,7 @@ async def _mean_response_time_seconds(session: AsyncSession, *, since: datetime)
         .subquery()
     )
     stmt = (
-        select(
-            func.avg(func.extract("epoch", first_audit.c.first_audit_at - Incident.created_at))
-        )
+        select(func.avg(func.extract("epoch", first_audit.c.first_audit_at - Incident.created_at)))
         .select_from(first_audit)
         .join(Incident, Incident.id == first_audit.c.incident_id)
     )
